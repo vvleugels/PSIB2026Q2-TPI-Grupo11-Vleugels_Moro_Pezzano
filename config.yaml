@@ -1,0 +1,25 @@
+data_dir: data/Task03_Liver
+output_dir: results
+
+selection:
+  candidate_pool_size: 15
+  n_cases: 10
+  slices_per_case: 5
+  minimum_slice_gap: 2
+  seed: 2026
+
+preprocessing:
+  hu_window:
+    center: 60
+    width: 400
+  denoising:
+    method: median
+    median_size: 3
+    gaussian_sigma: 1.0
+    bilateral_sigma_color: 0.08
+    bilateral_sigma_spatial: 3.0
+  enhancement:
+    method: none
+    clahe_clip_limit: 0.01
+    clahe_kernel_size: 8
+  crop_margin: 8

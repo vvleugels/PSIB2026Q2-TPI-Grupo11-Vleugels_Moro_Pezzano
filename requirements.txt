@@ -1,6 +1,8 @@
-numpy
-nibabel
-scipy
-scikit-image
-matplotlib
-opencv-python
+numpy>=1.26
+scipy>=1.11
+scikit-image>=0.22
+nibabel>=5.2
+matplotlib>=3.8
+opencv-python>=4.8
+pandas>=2.1
+pyyaml>=6.0
