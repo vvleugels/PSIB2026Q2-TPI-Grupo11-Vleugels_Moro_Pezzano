@@ -34,17 +34,22 @@ a virtual environment between operating systems.
 
 ## Data and configuration
 
-Place the labeled LiTS/Medical Segmentation Decathlon Task03 Liver data under
-`data/`. The supported layouts include `data/Task03_Liver/imagesTr/liver_N.nii.gz`
-with paired masks in `labelsTr/`, and LiTS-style `volume-N.nii[.gz]` plus
-`segmentation-N.nii[.gz]` pairs. `imagesTs/` has no masks in the supplied dataset
-and is not included in the reference-mask inventory. Keep data local; it is
-ignored by Git. The case and slice selection intentionally uses the reference
-segmentation masks, so it is suitable for choosing report examples, not for
-claiming an unbiased prospective sample.
+The project includes a compact `data/Selected_database/` with 10 labeled CT/mask
+pairs selected from the 131-case training split. It is the portable default and
+is enough to run the program. For the full source dataset, place Task03 Liver
+under `data/Task03_Liver/`. Supported layouts include
+`imagesTr/liver_N.nii.gz` paired with `labelsTr/liver_N.nii.gz`, and LiTS-style
+`volume-N.nii[.gz]` plus `segmentation-N.nii[.gz]` pairs. `imagesTs/` has no masks
+in the supplied dataset and is excluded. Data stays local and is ignored by Git.
+Case and slice selection uses the reference masks, so this subset is suitable
+for running examples, not for claiming an unbiased prospective sample.
+
+The subset README and `dataset.json` retain the source license and citation
+details. The Medical Segmentation Decathlon describes the data as CC-BY-SA 4.0
+and asks users to cite its dataset paper.
 
 Edit portable defaults in `config.yaml`. `selection.candidate_pool_size` (15 by
-default) controls the seeded pool sampled from the 131 labeled training cases;
+default) controls the seeded pool sampled from the available labeled cases;
 `selection.n_cases` (10) controls the final cases selected from that pool;
 `selection.slices_per_case` is configurable from 3 to 5. `selection.seed` makes
 both stages reproducible. If `config.local.yaml` exists beside it, that file

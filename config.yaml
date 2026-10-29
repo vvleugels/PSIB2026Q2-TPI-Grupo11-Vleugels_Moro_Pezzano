@@ -1,4 +1,4 @@
-data_dir: data/Task03_Liver
+data_dir: data/Selected_database
 output_dir: results
 
 selection:

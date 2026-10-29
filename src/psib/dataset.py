@@ -14,8 +14,9 @@ def build_inventory(data_dir: str | Path, candidate_pool_size: int = 15, seed: i
     """Inventory a seeded subsample of labeled cases, loading one volume at a time.
 
     The candidate pool is sampled from ``list_cases(data_dir)`` and is a
-    reproducible subsample of the available labeled cases (131 in the supplied
-    LiTS/Task03 training split). Unlabeled test images are never inventoried.
+    reproducible subsample of the available labeled cases. The original
+    Task03 training split has 131 pairs; the bundled shareable subset has 10.
+    Unlabeled test images are never inventoried.
     """
     if candidate_pool_size < 1:
         raise ValueError("candidate_pool_size must be positive")
@@ -65,8 +66,8 @@ def select_cases(inventory: pd.DataFrame, n_cases: int, seed: int) -> list[int]:
     """Select reproducible, tercile-balanced cases, favoring multi-lesion cases.
 
     Terciles and selected slices use the supplied reference masks. The input
-    inventory is a seeded candidate-pool subsample of the 131 labeled LiTS
-    cases, not an unbiased cohort or a learned prediction. Missing terciles
+    inventory is a seeded candidate-pool subsample of the available labeled
+    LiTS cases, not an unbiased cohort or a learned prediction. Missing terciles
     and the absence of multi-lesion cases are reported as errors.
     """
     if n_cases < 1:
