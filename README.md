@@ -1,5 +1,4 @@
 # PSIB 2026 Q2 — Liver CT practical project
-Estoy modificando algo?
 
 Person A's classical image-processing work for liver tumor data: dataset loading,
 exploration, reference-mask-based case/slice selection, and preprocessing. Baseline 2D tumor segmentation, Dice/IoU metrics and a reproducible experiment
