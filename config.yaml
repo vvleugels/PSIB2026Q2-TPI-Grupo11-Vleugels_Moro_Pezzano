@@ -23,3 +23,15 @@ preprocessing:
     clahe_clip_limit: 0.01
     clahe_kernel_size: 8
   crop_margin: 8
+
+segmentation:
+  method: global
+  threshold: 0.45
+  k: 1.0
+  direction: lower
+  opening: false
+  closing: false
+  fill_holes: false
+  footprint: disk
+  radius: 1
+  min_area: 0

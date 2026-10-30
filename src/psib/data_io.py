@@ -124,3 +124,67 @@ def get_slice(volume: np.ndarray, k: int) -> np.ndarray:
     if not 0 <= k < volume.shape[2]:
         raise IndexError(f"Slice index {k} outside [0, {volume.shape[2] - 1}]")
     return volume[:, :, k]
+
+
+def _slice_geometry(image):
+    """Canonical geometry from header only, without materializing a volume."""
+    if len(image.shape) != 3:
+        raise ValueError(f"Expected a 3D NIfTI header; got shape {image.shape}")
+    transform = nib.orientations.ornt_transform(
+        nib.orientations.io_orientation(image.affine),
+        nib.orientations.axcodes2ornt(("R", "A", "S")))
+    order = np.argsort(transform[:, 0].astype(int))
+    shape = tuple(image.shape[int(axis)] for axis in order)
+    affine = image.affine @ nib.orientations.inv_ornt_aff(transform, image.shape)
+    return shape, affine, transform
+
+
+def _read_slice(image, transform, k):
+    """Read one proxy plane and orient it to canonical X,Y using 2D operations."""
+    axial_axis = int(np.flatnonzero(transform[:, 0] == 2)[0])
+    source_k = k if transform[axial_axis, 1] > 0 else image.shape[axial_axis] - 1 - k
+    selection = [slice(None)] * 3
+    selection[axial_axis] = source_k
+    plane = np.asarray(image.dataobj[tuple(selection)], dtype=np.float32)
+    remaining = [axis for axis in range(3) if axis != axial_axis]
+    for plane_axis, source_axis in enumerate(remaining):
+        if transform[source_axis, 1] < 0:
+            plane = np.flip(plane, axis=plane_axis)
+    return plane.transpose(np.argsort(transform[remaining, 0])).copy()
+
+
+def iter_case_slices(case_id: int, slice_indices=None, data_dir=None, *, mask_only=False):
+    """Yield ``(k, ct_2d, seg_2d, spacing)`` without loading full 3D arrays.
+
+    NIfTI headers are checked for matching canonical shape/affine. Each proxy
+    read extracts one source plane, then flips/transposes that 2D plane to X,Y.
+    Scaling is applied by the proxy. ``slice_indices=None`` scans axial slices
+    in order; ``mask_only=True`` returns None for CT and reads only masks.
+    Gzipped files may require repeated decompression, trading time for memory.
+    """
+    if data_dir is None:
+        from .config import load_config
+        data_dir = load_config()["data_dir"]
+    pairs = _pairs(data_dir)
+    if int(case_id) not in pairs:
+        raise FileNotFoundError(f"No paired CT volume and segmentation for case {case_id} in {data_dir}")
+    volume_path, mask_path = pairs[int(case_id)]
+    volume = nib.load(str(volume_path), mmap=True, keep_file_open=True)
+    mask = nib.load(str(mask_path), mmap=True, keep_file_open=True)
+    shape, affine, volume_transform = _slice_geometry(volume)
+    mask_shape, mask_affine, mask_transform = _slice_geometry(mask)
+    if shape != mask_shape or not np.allclose(affine, mask_affine, atol=1e-4):
+        raise ValueError(f"Case {case_id} volume/mask canonical shape or affine mismatch")
+    spacing = tuple(float(v) for v in nib.affines.voxel_sizes(affine))
+    indices = range(shape[2]) if slice_indices is None else slice_indices
+    for k in indices:
+        if not isinstance(k, (int, np.integer)) or not 0 <= k < shape[2]:
+            raise IndexError(f"Case {case_id} slice index {k} outside [0, {shape[2] - 1}]")
+        raw = _read_slice(mask, mask_transform, k)
+        rounded = np.rint(raw)
+        if (not np.isfinite(raw).all() or not np.allclose(raw, rounded, atol=1e-4)
+                or not np.isin(rounded, (0, 1, 2)).all()):
+            raise ValueError(f"Case {case_id}, slice {k}: expected integer labels 0, 1, 2")
+        seg = rounded.astype(np.uint8)
+        ct = None if mask_only else _read_slice(volume, volume_transform, k)
+        yield int(k), ct, seg, spacing

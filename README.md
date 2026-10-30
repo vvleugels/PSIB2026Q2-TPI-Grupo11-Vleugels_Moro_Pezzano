@@ -2,9 +2,10 @@
 Estoy modificando algo?
 
 Person A's classical image-processing work for liver tumor data: dataset loading,
-exploration, reference-mask-based case/slice selection, and preprocessing. No
-segmentation algorithm, evaluation metrics, feature extraction, quantification,
-compression, or reconstruction module is implemented here.
+exploration, reference-mask-based case/slice selection, and preprocessing. Baseline 2D tumor segmentation, Dice/IoU metrics and a reproducible experiment
+runner are also available. Feature extraction, quantification, compression and
+reconstruction modules are not implemented. See [documentation.md](documentation.md)
+for the complete current workflow.
 
 ## Install
 
@@ -58,7 +59,11 @@ takes precedence and can hold machine-specific paths. Relative paths are
 resolved from the selected config file. Generated tables and figures go to
 `results/`, which is ignored by Git.
 
-Run the workflow from the project root:
+The original workflow below loads complete volumes and counts 3D components.
+It is not used on the current resource-limited PC; use the 2D segmentation
+workflow at the end of this README instead.
+
+Original workflow:
 
 ```bash
 python scripts/explore_dataset.py
@@ -121,3 +126,32 @@ python -m unittest
 ```
 
 Tests use synthetic data and do not require LiTS files.
+
+
+## Segmentation experiments
+
+Run from the project root using only 2D slice reads:
+
+```bash
+python scripts/select_slices_2d.py
+python scripts/run_segmentation.py --run-id base
+python scripts/run_segmentation.py --run-id comparacion --sweep
+```
+
+Selection scans masks plane by plane, without 3D components or volume-burden
+stratification. All 10 local cases are included with the default configuration.
+The base run uses the `segmentation` YAML block. The sweep compares 252
+fixed threshold/morphology configurations using the same preprocessing. CT
+and labels are read as individual planes without loading full volumes. Optional
+`--config` selects a config path, retaining local-config precedence. Run IDs must
+be new and contain only ASCII letters, digits, hyphens or underscores.
+
+Outputs live under `results/segmentation/<run-id>/`: effective configuration,
+selection copy, per-slice/per-case metrics, configuration summary, status and
+prediction masks/figures. Sweep mode exports masks/figures for the best setting
+of each method. Case metrics pool pixel counts over selected slices; summaries
+weight cases equally. These are exploratory results with known liver regions,
+not an independent full-volume evaluation.
+
+See [documentation.md](documentation.md) for output schemas and failure handling,
+and [experiment notes](docs/notas_segmentacion.md) for measured comparisons.

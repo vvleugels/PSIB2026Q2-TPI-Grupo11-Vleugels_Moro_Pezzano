@@ -16,8 +16,9 @@ segmentación y sus tests presentes en el directorio de trabajo.
 | Preprocesamiento y exportación de figuras | Implementado |
 | Segmentación 2D y posprocesamiento | Implementado como API Python |
 | Dice e IoU | Implementados como API Python |
-| Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Pendiente |
-| Barrido de parámetros, comparación experimental y evaluación independiente | Pendiente |
+| Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Implementado |
+| Barrido de 252 configuraciones y comparación exploratoria | Implementado |
+| Evaluación independiente con otra base | Pendiente |
 
 La introducción del README y algunas notas históricas describen la etapa inicial,
 anterior a los módulos de segmentación y métricas. Para el estado funcional actual,
@@ -28,12 +29,12 @@ consultar este documento junto con el código y los tests.
 | Ubicación | Responsabilidad |
 | --- | --- |
 | `src/psib/config.py` | Lectura del YAML, precedencia local y resolución de rutas |
-| `src/psib/data_io.py` | Descubrimiento, orientación y carga de CT y etiquetas |
+| `src/psib/data_io.py` | Descubrimiento, orientación, carga por volumen y lector por cortes |
 | `src/psib/dataset.py` | Inventario, terciles de volumen tumoral y selección |
 | `src/psib/preprocessing.py` | Ventana HU, filtros, realce y recorte hepático |
 | `src/psib/segmentation.py` | Umbrales 2D, morfología y componentes conectados |
 | `src/psib/metrics.py` | Dice e IoU entre máscaras binarias |
-| `scripts/` | Tres puntos de entrada para exploración, selección y figuras |
+| `scripts/` | Exploración, selección, figuras y experimentos de segmentación |
 | `notebooks/` | Ejemplos interactivos de exploración y preprocesamiento |
 | `tests/` | Tests sintéticos con `unittest` |
 | `docs/notas_segmentacion.md` | Alcance y criterios metodológicos del estudio |
@@ -169,13 +170,17 @@ Valores del YAML base:
 | `preprocessing.enhancement.clahe_kernel_size` | 8 | Tamaño de región CLAHE |
 | `preprocessing.crop_margin` | 8 | Margen del recorte en píxeles |
 
-No existe todavía una sección YAML de segmentación ni opciones CLI para
-elegir configuración en los tres scripts. Los parámetros de segmentación se
-pasan directamente a su función Python.
+El bloque `segmentation` contiene los valores de la sección 8. El nuevo ejecutor
+admite `--config`; los tres scripts anteriores mantienen su configuración fija
+en la raíz. Se conserva la precedencia completa de `config.local.yaml`.
 
 ## 6. Flujo ejecutable y archivos de salida
 
-Con el entorno activado y los datos disponibles:
+El flujo original siguiente carga volúmenes completos y cuenta componentes 3D.
+**No se ejecutará en esta PC por su consumo de memoria.** Para la ejecución
+actual usar la selección 2D y el ejecutor de la sección 14.
+
+Flujo original, reservado para una máquina con recursos suficientes:
 
 ```bash
 python scripts/explore_dataset.py
@@ -367,7 +372,7 @@ import pandas as pd
 sys.path.insert(0, str(Path.cwd() / "src"))
 
 from psib.config import load_config
-from psib.data_io import get_slice, load_case
+from psib.data_io import iter_case_slices
 from psib.preprocessing import preprocess_slice
 from psib.segmentation import segment_slice
 from psib.metrics import dice_score, iou_score
@@ -375,10 +380,9 @@ from psib.metrics import dice_score, iou_score
 cfg = load_config(Path.cwd() / "config.yaml")
 selected = pd.read_csv(Path(cfg["_output_dir"]) / "selected_cases_slices.csv")
 row = selected.iloc[0]
-ct, seg, spacing = load_case(int(row.case_id), cfg["data_dir"])
 k = int(row.slice_index)
-slice_hu = get_slice(ct, k)
-labels = get_slice(seg, k)
+_, slice_hu, labels, spacing = next(iter_case_slices(
+    int(row.case_id), [k], cfg["data_dir"]))
 liver = labels > 0
 reference = labels == 2
 processed = preprocess_slice(slice_hu, liver, cfg)
@@ -394,8 +398,8 @@ print({
 ```
 
 Si el corte no contiene hígado, no puede usarse `preprocess_slice` porque
-intenta recortarlo. El ejecutor futuro deberá definir explícitamente cómo
-manejar esos cortes; la función de segmentación sí admite una región vacía.
+intenta recortarlo. El ejecutor utiliza directamente ventana y filtrado, sin recorte, y puede
+procesar esos cortes con predicción vacía.
 
 ## 11. Notebooks y tests
 
@@ -420,8 +424,10 @@ python -m pip check
 | `test_preprocessing.py` | Ventana, coordenadas de recorte, forma y dtype de filtros |
 | `test_metrics.py` | Casos idénticos, disjuntos, vacíos, solapamiento y validación |
 | `test_segmentation.py` | Umbrales, región hepática, morfología, conectividad y contrato |
+| `test_run_segmentation.py` | Ejecución, exportación, agregación, barrido, fallos y reproducibilidad |
+| `test_slice_io.py` | Lectura por planos, orientación, rango de etiquetas y selección 2D |
 
-La suite contiene 29 tests y no requiere los datos reales. Estos tests no
+La suite incluye tests sintéticos del ejecutor y no requiere los datos reales. Estos tests no
 sustituyen una evaluación de calidad de segmentación ni una prueba completa
 de los tres scripts sobre todos los volúmenes.
 
@@ -441,17 +447,19 @@ de los tres scripts sobre todos los volúmenes.
 | Formas distintas en segmentación o métricas | Conservar las coordenadas completas o reconstruir el recorte; no redimensionar para ocultar el desajuste |
 
 La revisión incluyó los módulos, scripts, configuración, notebooks y tests.
-Se verificó la suite sintética; no se ejecutó aquí el procesamiento completo
-de los datos reales ni se midió el desempeño tumoral.
+La revisión se complementa con la suite sintética y los experimentos locales
+registrados en `docs/notas_segmentacion.md`.
 
 Detalles a considerar en trabajos futuros:
 
-- La validación de etiquetas NIfTI convierte a `uint8` antes de comprobar
+- La validación de etiquetas de los cargadores volumétricos originales convierte
+  a `uint8` antes de comprobar
   el conjunto `{0,1,2}`; no debe asumirse como una validación exhaustiva de
-  etiquetas arbitrarias fuera de rango.
+  etiquetas arbitrarias fuera de rango. El lector nuevo por cortes valida el
+  rango antes de convertir a `uint8`.
 - Algunos textos de exploración fijan el contexto de 131 casos etiquetados;
   si se usa otra base, ese texto no describe necesariamente su tamaño.
-- No hay tests específicos de precedencia de configuración ni cobertura de
+- El ejecutor prueba la precedencia de configuración local. No hay cobertura de
   todas las validaciones de NIfTI; las garantías de tests son las indicadas arriba.
 
 ## 13. Interpretación experimental y próximos pasos
@@ -465,7 +473,108 @@ por caso sobre esos cortes no equivale a evaluar el volumen completo. La
 evaluación posterior en una base más grande deberá excluir los casos usados
 en el ajuste y conservar la configuración elegida para esa evaluación.
 
-Queda implementar el ejecutor de segmentación, la exportación de máscaras y
-tablas por corte/caso, el barrido reproducible de parámetros y el registro de
-resultados reales en las notas del estudio. Todavía no hay resultados de ese
-estudio que permitan afirmar qué método o parámetros funcionan mejor.
+El ejecutor y el barrido permiten comparar las variantes sobre los casos locales.
+Los resultados y sus límites se registran en las notas del estudio. Queda realizar
+la evaluación independiente con una base sin casos utilizados en el ajuste.
+
+
+## 14. Ejecutor de segmentación y barrido
+
+Desde la raíz, usando exclusivamente procesamiento 2D:
+
+```bash
+python scripts/select_slices_2d.py
+python scripts/run_segmentation.py --run-id base
+python scripts/run_segmentation.py --run-id comparacion --sweep
+python scripts/run_segmentation.py --config config.yaml --run-id alternativa
+```
+
+`--run-id` es obligatorio y admite letras ASCII, números, guiones y guiones bajos.
+La carpeta `<output_dir>/segmentation/<run-id>/` debe ser nueva, incluso si una
+corrida anterior falló. No se regenera la selección automáticamente. Para otro
+archivo de configuración, los CSV de entrada deben estar en su directorio de
+salida efectivo.
+
+Sin `--sweep` se usa el bloque YAML `segmentation`. En barrido se reemplaza ese
+bloque por una grilla fija, conservando el preprocesamiento:
+
+- Umbrales globales 30, 40 y 50 HU; Otsu; estadístico inferior con k=0.5, 1 y 1.5.
+- Seis perfiles: ninguno; apertura disco radio 1; cierre disco radio 1;
+  apertura+cierre disco radio 1; apertura+cierre disco radio 2;
+  apertura+cierre cuadrado de lado 3.
+- Relleno de huecos desactivado/activado y área mínima 0, 25 o 100 píxeles.
+
+El producto genera 252 configuraciones con identificadores estables `cfg_000`
+a `cfg_251`. Los umbrales HU se convierten usando la ventana efectiva; si alguno
+queda fuera de ella, la corrida falla. No se ajusta el preprocesamiento en la grilla.
+
+Cada caso se abre una vez en la primera pasada y solo se leen los planos elegidos;
+cada corte se filtra una vez. No se construye un array volumétrico completo.
+Se usa el mismo resultado `denoised` del preprocesamiento, sin realce ni recorte.
+Los cortes sin hígado se procesan con máscara vacía. En barrido se realiza una
+segunda pasada por casos para exportar las tres variantes ganadoras.
+
+### Archivos por ejecución
+
+| Archivo | Contenido |
+| --- | --- |
+| `selected_cases_slices.csv` | Copia exacta de la selección de entrada |
+| `effective_config.yaml` | Configuración efectiva con valores de segmentación completos, sin claves internas |
+| `configurations.csv` | Identificador, parámetros y umbral HU cuando aplica |
+| `metrics_per_slice.csv` | Configuración, caso, corte, áreas, intersección, unión, Dice e IoU |
+| `metrics_per_case.csv` | Conteos acumulados sobre cortes seleccionados y métricas por caso |
+| `summary.csv` | Cantidad de casos, media y desvío poblacional entre casos |
+| `best_configurations.csv` | Mejor configuración de cada método; solo en barrido |
+| `run.json` | Estado, argumentos, tiempos UTC, versiones, revisión Git y cambios locales |
+| `predictions/<configuration_id>/*.npy` | Máscaras booleanas completas, sin transposición |
+| `predictions/<configuration_id>/*.png` | Imagen filtrada, referencia y predicción, con métricas |
+
+Los CSV de métricas identifican la configuración mediante `configuration_id`;
+los parámetros completos se consultan en `configurations.csv`. `pred_area` y
+`reference_area` son conteos de píxeles, no superficies físicas.
+
+Para cada caso se suman las áreas, intersecciones y uniones de sus cortes y
+se calculan Dice e IoU desde esos totales. No se promedian las métricas por
+corte. El resumen sí promedia las métricas entre casos, dando el mismo peso
+a cada caso. Los desvíos son poblacionales (`ddof=0`).
+
+Las ganadoras se eligen por Dice medio descendente, luego IoU medio descendente
+y, ante empate, identificador ascendente. Es una configuración común para todos
+los casos por método. Se guardan todas las métricas del barrido, pero solo máscaras
+y figuras de las ganadoras. En modo simple se exportan todos los cortes de su
+única configuración.
+
+El estado pasa de `running` a `completed` solo al terminar tablas, máscaras y
+figuras. Un error deja `failed`, mensaje y contexto de caso/corte/configuración
+cuando corresponda. Los resultados parciales de una corrida fallida no deben
+interpretarse como un estudio completo. Si el proceso se interrumpe externamente,
+puede quedar en `running`; no hay reanudación automática.
+
+
+### Lectura de cortes con memoria acotada
+
+`iter_case_slices(case_id, slice_indices=None, data_dir=None, mask_only=False)`
+produce `(k, ct_2d, seg_2d, spacing)` por corte. Comprueba la geometría desde
+las cabeceras y lee un plano mediante el proxy NIfTI. Las inversiones y
+permutaciones a orientación canónica se aplican sobre ese plano 2D. No llama
+a `load_case` ni materializa arrays 3D. Con `mask_only=True`, CT es `None` y
+solo se leen etiquetas. La descompresión de `.nii.gz` puede requerir leer datos
+anteriores al corte, pero no almacenarlos como un volumen completo.
+
+`select_slices_2d.py --config config.yaml` usa ese lector para recorrer máscaras
+corte a corte y guardar únicamente sus conteos de área. Selecciona `n_cases`
+con semilla fija (los 10 si se solicitan todos los disponibles), luego prioriza
+área tumoral, área hepática e índice con la separación mínima existente.
+Genera el mismo CSV de entrada que necesita el ejecutor, con columnas mínimas
+más semilla y criterio, sin volumen tumoral, terciles ni componentes 3D.
+Esta variante de selección se registra explícitamente en el CSV y en las notas.
+
+Por la restricción de recursos se verifican las pruebas del lector y del flujo
+2D, sin volver a ejecutar el inventario volumétrico sobre datos reales:
+
+```bash
+python -m unittest tests.test_slice_io tests.test_run_segmentation tests.test_segmentation tests.test_metrics tests.test_preprocessing
+```
+
+Los NIfTI de prueba son fixtures sintéticos pequeños; no se realiza segmentación
+ni análisis de componentes 3D de los volúmenes reales.

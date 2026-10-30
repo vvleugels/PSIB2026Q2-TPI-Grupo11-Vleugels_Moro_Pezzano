@@ -3,8 +3,8 @@
 ## Objetivo y estado
 
 Definir el alcance y los criterios de trabajo para implementar y comparar
-métodos clásicos de segmentación de tumores hepáticos. Esta primera etapa
-documenta la metodología prevista; todavía no contiene resultados experimentales.
+métodos clásicos de segmentación de tumores hepáticos. La primera etapa fijó la metodología. Las secciones finales registran las
+ejecuciones exploratorias posteriores y sus resultados.
 
 ## Datos y alcance 2D
 
@@ -81,3 +81,67 @@ independientes.
 El alcance, las convenciones de ejes, la selección y las interfaces se revisaron
 contra el README del proyecto. Esta etapa agrega únicamente documentación:
 no modifica código, configuración ni datos y no requiere ejecutar tests.
+
+
+## Ejecución 2D en la PC local — 30 de octubre de 2026
+
+Por la restricción de memoria de esta PC se abandonó la exploración volumétrica.
+No se ejecutan componentes conectados 3D ni se cargan volúmenes completos para
+la selección o segmentación. Se incorporó un lector de planos NIfTI que aplica
+la orientación canónica sobre cada corte 2D.
+
+### Selección y comandos
+
+```bash
+python scripts/select_slices_2d.py
+python scripts/run_segmentation.py --run-id base
+python scripts/run_segmentation.py --run-id comparacion --sweep
+```
+
+La selección 2D incluyó los 10 casos disponibles y 5 cortes por caso, con semilla
+2026 y separación mínima de 2 índices: 50 cortes en total. Se prioriza área
+tumoral, luego área hepática e índice. Al usar todos los casos no se aplica
+estratificación por volumen ni exigencia de múltiples componentes 3D. Esto es
+una adaptación explícita respecto de la selección original basada en inventario.
+El CSV guardado en cada ejecución conserva el criterio y los índices exactos.
+
+Se mantuvo fija la ventana [-140, 260] HU y la mediana de tamaño 3. Se segmentó
+la imagen filtrada completa sin realce ni recorte. Las referencias tumorales
+participan de la selección y la evaluación, pero no son entrada de los umbrales.
+
+### Configuración base
+
+La corrida `base` utiliza umbral global 40 HU (0.45 normalizado), sin apertura,
+cierre, relleno ni filtro por área. Sobre los 10 casos obtuvo:
+
+| Métrica entre casos | Media | Desvío poblacional |
+| --- | ---: | ---: |
+| Dice | 0.262757 | 0.254257 |
+| IoU | 0.178796 | 0.189559 |
+
+Las métricas de cada caso se calculan con conteos acumulados de sus 5 cortes;
+la tabla anterior pondera los casos por igual. No es una métrica volumétrica.
+Los archivos completos están en `results/segmentation/base/`.
+
+La inspección del caso 76, corte 148, muestra que el umbral detecta una parte
+importante de la referencia, pero deja borde sin cubrir y pequeños fragmentos
+adicionales. Ese corte obtuvo Dice 0.766937 e IoU 0.621977. Es un ejemplo favorable,
+no representativo de todos los casos.
+
+### Estado del barrido y restricciones de ejecución
+
+El barrido real `comparacion` quedó interrumpido y marcado como fallido; no
+generó tablas completas ni configuraciones ganadoras. No se presentan resultados
+comparativos de las 252 variantes. La implementación del barrido sí se verificó
+con datos sintéticos, incluida su selección determinista de ganadores.
+
+Pasaron las 34 pruebas del flujo adaptado y una prueba adicional que comprueba
+que la reutilización de morfología y componentes produce las mismas máscaras
+que segmentar cada configuración por separado. No se volvió a ejecutar la suite
+completa que incluye el inventario volumétrico.
+
+La restricción de esta laptop es de ejecución, no de implementación: las funciones
+originales de carga volumétrica, inventario y conteo de componentes 3D permanecen
+disponibles para una máquina con recursos suficientes. La selección 2D es una
+alternativa y no reemplaza ni elimina ese flujo original. No hay corridas activas;
+el estudio comparativo real queda pendiente de una ejecución posterior autorizada.
