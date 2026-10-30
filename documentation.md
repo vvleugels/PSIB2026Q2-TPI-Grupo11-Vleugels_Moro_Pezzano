@@ -37,7 +37,6 @@ consultar este documento junto con el código y los tests.
 | `scripts/` | Exploración, selección, figuras y experimentos de segmentación |
 | `notebooks/` | Ejemplos interactivos de exploración y preprocesamiento |
 | `tests/` | Tests sintéticos con `unittest` |
-| `notas_segmentacion.md` | Alcance y criterios metodológicos del estudio |
 | `data/` | Datos locales, ignorados por Git |
 | `results/` | Tablas y figuras generadas, ignoradas por Git |
 
@@ -447,8 +446,8 @@ de los tres scripts sobre todos los volúmenes.
 | Formas distintas en segmentación o métricas | Conservar las coordenadas completas o reconstruir el recorte; no redimensionar para ocultar el desajuste |
 
 La revisión incluyó los módulos, scripts, configuración, notebooks y tests.
-La revisión se complementa con la suite sintética y los experimentos locales
-registrados en `notas_segmentacion.md`.
+La revisión se complementa con la suite sintética. Los archivos de ejecuciones
+locales se guardan en `results/`, fuera de Git.
 
 Detalles a considerar en trabajos futuros:
 
@@ -474,8 +473,8 @@ evaluación posterior en una base más grande deberá excluir los casos usados
 en el ajuste y conservar la configuración elegida para esa evaluación.
 
 El ejecutor y el barrido permiten comparar las variantes sobre los casos locales.
-Los resultados y sus límites se registran en las notas del estudio. Queda realizar
-la evaluación independiente con una base sin casos utilizados en el ajuste.
+Queda completar el barrido experimental y realizar la evaluación independiente
+con una base sin casos utilizados en el ajuste.
 
 
 ## 14. Ejecutor de segmentación y barrido

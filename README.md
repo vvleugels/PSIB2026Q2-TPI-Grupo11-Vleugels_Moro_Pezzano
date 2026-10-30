@@ -153,5 +153,4 @@ of each method. Case metrics pool pixel counts over selected slices; summaries
 weight cases equally. These are exploratory results with known liver regions,
 not an independent full-volume evaluation.
 
-See [documentation.md](documentation.md) for output schemas and failure handling,
-and [experiment notes](notas_segmentacion.md) for measured comparisons.
+See [documentation.md](documentation.md) for output schemas and failure handling.
