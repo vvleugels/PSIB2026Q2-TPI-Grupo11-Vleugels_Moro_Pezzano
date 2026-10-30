@@ -1,0 +1,471 @@
+# Documentación del programa
+
+## 1. Propósito y estado actual
+
+El proyecto permite explorar tomografías de hígado etiquetadas, seleccionar
+casos y cortes axiales, preprocesarlos y aplicar métodos clásicos de
+segmentación de posibles tumores. También incluye métricas Dice e IoU.
+
+Esta documentación describe el código actual, incluidos los módulos de
+segmentación y sus tests presentes en el directorio de trabajo.
+
+| Capacidad | Estado |
+| --- | --- |
+| Descubrimiento y carga de pares CT/máscara NIfTI | Implementado |
+| Inventario y selección reproducible de casos y cortes | Implementado |
+| Preprocesamiento y exportación de figuras | Implementado |
+| Segmentación 2D y posprocesamiento | Implementado como API Python |
+| Dice e IoU | Implementados como API Python |
+| Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Pendiente |
+| Barrido de parámetros, comparación experimental y evaluación independiente | Pendiente |
+
+La introducción del README y algunas notas históricas describen la etapa inicial,
+anterior a los módulos de segmentación y métricas. Para el estado funcional actual,
+consultar este documento junto con el código y los tests.
+
+## 2. Estructura y responsabilidades
+
+| Ubicación | Responsabilidad |
+| --- | --- |
+| `src/psib/config.py` | Lectura del YAML, precedencia local y resolución de rutas |
+| `src/psib/data_io.py` | Descubrimiento, orientación y carga de CT y etiquetas |
+| `src/psib/dataset.py` | Inventario, terciles de volumen tumoral y selección |
+| `src/psib/preprocessing.py` | Ventana HU, filtros, realce y recorte hepático |
+| `src/psib/segmentation.py` | Umbrales 2D, morfología y componentes conectados |
+| `src/psib/metrics.py` | Dice e IoU entre máscaras binarias |
+| `scripts/` | Tres puntos de entrada para exploración, selección y figuras |
+| `notebooks/` | Ejemplos interactivos de exploración y preprocesamiento |
+| `tests/` | Tests sintéticos con `unittest` |
+| `docs/notas_segmentacion.md` | Alcance y criterios metodológicos del estudio |
+| `data/` | Datos locales, ignorados por Git |
+| `results/` | Tablas y figuras generadas, ignoradas por Git |
+
+El paquete usa estructura `src/`. Los scripts agregan esa carpeta a `sys.path`;
+no existe actualmente un archivo de empaquetado para instalarlo con `pip install .`.
+
+## 3. Instalación y entorno
+
+La versión objetivo es **Python 3.12**. Ejecutar desde la raíz del repositorio.
+
+### Linux
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-notebooks.txt  # opcional
+```
+
+Si `.venv` ya existe, alcanza con activarlo. Comprobar el intérprete con
+`python --version`. El entorno virtual puede coexistir con otra versión de
+Python instalada en el sistema.
+
+### Windows (CMD)
+
+```cmd
+py -3.12 -m venv .venv
+.venv\Scripts\activate.bat
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-notebooks.txt
+```
+
+No copiar el entorno virtual entre sistemas operativos.
+
+Las dependencias base son NumPy, SciPy, scikit-image, NiBabel, Matplotlib,
+OpenCV, pandas y PyYAML. OpenCV está declarado como dependencia, aunque los
+módulos actuales no lo importan. El archivo opcional agrega JupyterLab,
+nbformat y nbclient, e incluye a su vez los requisitos base.
+
+Los requisitos expresan versiones mínimas, no versiones exactas. Para reproducir
+experimentos, conservar además las versiones efectivamente instaladas.
+
+## 4. Datos y convenciones espaciales
+
+La configuración base apunta al subconjunto local `data/Selected_database/`,
+con 10 pares CT/máscara. Los datos no se descargan automáticamente ni se
+incluyen mediante Git. Conservar la información de licencia y procedencia
+del README y `dataset.json` del dataset.
+
+Se admiten dos convenciones de nombres, en las carpetas `imagesTr/` y
+`labelsTr/`, o directamente en el directorio configurado:
+
+```text
+data/Selected_database/
+  imagesTr/liver_3.nii.gz
+  labelsTr/liver_3.nii.gz
+
+data/Task03_Liver/
+  volume-3.nii.gz
+  segmentation-3.nii.gz
+```
+
+Se aceptan `.nii` y `.nii.gz`. En el formato `liver_N`, la máscara debe tener
+el mismo nombre y extensión que la imagen. Solo se listan casos con ambos
+archivos; los identificadores duplicados generan un error. Los archivos
+auxiliares cuyo nombre empieza con `._` se ignoran. `imagesTs/` no participa.
+
+### Etiquetas y ejes
+
+| Valor | Significado |
+| --- | --- |
+| 0 | Fondo |
+| 1 | Hígado sin etiqueta tumoral |
+| 2 | Tumor |
+
+- Región hepática completa: `seg > 0`, incluyendo el tumor.
+- Referencia tumoral: `seg == 2`.
+- Los arrays se reorientan a la orientación canónica más cercana a RAS mediante
+  NiBabel; no se realiza un remuestreo a resolución isotrópica.
+- Orden de ejes: `(X, Y, Z)`. Corte axial: `array[:, :, k]`, con índice desde 0.
+- Espaciado: `(sx, sy, sz)` en milímetros, siguiendo los ejes del array.
+- Las figuras muestran `image.T` con `origin="lower"`; esa transposición es de
+  visualización y no cambia la convención de los arrays de procesamiento.
+
+### API de carga
+
+| Función | Resultado |
+| --- | --- |
+| `list_cases(data_dir)` | Lista ordenada de identificadores con pares disponibles |
+| `load_case(case_id, data_dir=None)` | `(ct_hu, seg, spacing)`; CT `float32`, etiquetas `uint8` |
+| `load_segmentation(case_id, data_dir=None)` | Solo las etiquetas canónicas, evitando cargar todo el CT |
+| `get_slice(volume, k)` | Corte 2D de un volumen 3D; error si `k` está fuera de rango |
+
+`load_case` comprueba forma, matriz afín canónica, espaciado e integridad de
+etiquetas. La carga de intensidades aplica la escala e intercepto del NIfTI
+mediante `get_fdata()`. Si se omite `data_dir`, se utiliza la configuración.
+
+## 5. Configuración
+
+Los scripts leen `config.yaml` desde la raíz. Si existe un archivo hermano
+`config.local.yaml`, se carga ese archivo **en reemplazo completo** del base:
+no hay combinación recursiva. Para mantener los valores del proyecto al
+personalizar rutas, copiar primero el YAML completo.
+
+Las rutas relativas se resuelven desde la carpeta del archivo elegido.
+`load_config(path=None)` devuelve un diccionario con rutas absolutas en
+`data_dir` y `output_dir`, y agrega `_root` y `_output_dir`. Además, crea el
+directorio de salida y su subdirectorio `figures/`.
+
+Valores del YAML base:
+
+| Parámetro | Valor | Uso |
+| --- | --- | --- |
+| `data_dir` | `data/Selected_database` | Pares de entrada |
+| `output_dir` | `results` | Salidas |
+| `selection.candidate_pool_size` | 15 | Máximo de candidatos muestreados |
+| `selection.n_cases` | 10 | Casos finales |
+| `selection.slices_per_case` | 5 | Cortes solicitados por caso; el script admite 3 a 5 |
+| `selection.minimum_slice_gap` | 2 | Separación mínima en índices, no en mm |
+| `selection.seed` | 2026 | Semilla del muestreo |
+| `preprocessing.hu_window.center` | 60 | Centro HU |
+| `preprocessing.hu_window.width` | 400 | Ancho HU |
+| `preprocessing.denoising.method` | `median` | Filtro activo |
+| `preprocessing.denoising.median_size` | 3 | Ventana mediana impar |
+| `preprocessing.denoising.gaussian_sigma` | 1.0 | Sigma gaussiano en píxeles |
+| `preprocessing.denoising.bilateral_sigma_color` | 0.08 | Escala de intensidad normalizada |
+| `preprocessing.denoising.bilateral_sigma_spatial` | 3.0 | Escala espacial del bilateral |
+| `preprocessing.enhancement.method` | `none` | Realce desactivado |
+| `preprocessing.enhancement.clahe_clip_limit` | 0.01 | Límite de CLAHE |
+| `preprocessing.enhancement.clahe_kernel_size` | 8 | Tamaño de región CLAHE |
+| `preprocessing.crop_margin` | 8 | Margen del recorte en píxeles |
+
+No existe todavía una sección YAML de segmentación ni opciones CLI para
+elegir configuración en los tres scripts. Los parámetros de segmentación se
+pasan directamente a su función Python.
+
+## 6. Flujo ejecutable y archivos de salida
+
+Con el entorno activado y los datos disponibles:
+
+```bash
+python scripts/explore_dataset.py
+python scripts/select_cases.py
+python scripts/preprocess_selected.py
+```
+
+Ejecutar en ese orden. Si cambia el dataset o la selección, regenerar las
+tablas antes de generar las figuras; no hay detección automática de tablas
+desactualizadas. Las ejecuciones reutilizan los nombres de salida y pueden
+sobrescribir archivos previos.
+
+### Exploración
+
+`explore_dataset.py` muestrea sin reemplazo hasta
+`min(candidate_pool_size, casos_disponibles)` casos con la semilla indicada.
+Con 10 casos locales y un máximo de 15, el inventario incluye los 10.
+
+Genera:
+
+- `results/candidate_pool.csv`: identificador, orden, semilla y criterio de muestreo.
+- `results/dataset_inventory.csv`: dimensiones, espaciado, estadísticas HU,
+  conteos de etiquetas, volumen tumoral y componentes tumorales 3D.
+- `results/figures/hu_histogram.png`.
+- `results/figures/tumor_volume_distribution.png`.
+- `results/figures/spacing_distribution.png`.
+
+El histograma HU usa hasta 100 000 vóxeles por caso del pool, muestreados en
+todo el CT. El volumen tumoral en cm³ se calcula como
+`tumor_voxels * sx * sy * sz / 1000`. La columna `liver_voxels` cuenta solo
+la etiqueta 1, mientras que la región de segmentación `seg > 0` incluye 1 y 2.
+El conteo `tumor_lesions_3d` usa componentes conectados con la conectividad
+predeterminada de SciPy en 3D: 6 vecinos. Es un conteo de componentes, no una
+identificación clínica de lesiones.
+
+### Selección
+
+`select_cases.py` requiere el inventario y genera
+`results/selected_cases_slices.csv`.
+
+Los casos se distribuyen por terciles de volumen tumoral (`small`, `medium`,
+`large`) y se prioriza incluir hasta dos casos con múltiples componentes
+tumorales cuando estén disponibles. Se informa un error si faltan tres
+terciles distinguibles, se solicitan más casos que los disponibles o no hay
+ningún caso con múltiples componentes.
+
+Los cortes se ordenan por área tumoral descendente, luego por área hepática
+y finalmente por índice. Se eligen respetando la separación mínima y se
+devuelven ordenados por índice. Puede obtenerse menos cantidad que la solicitada
+si el espaciado entre índices lo impide; también pueden incluirse cortes sin
+tumor. La función no garantiza por sí sola que todos los cortes tengan hígado.
+
+El CSV incluye `selection_rank`, `case_id`, `slice_index`, `tumor_volume_cm3`,
+`tumor_lesions_3d`, `burden_tercile`, `candidate_pool_size`, `seed` y
+`selection_criteria`.
+
+### Figuras de preprocesamiento
+
+`preprocess_selected.py` carga cada caso una vez por grupo de cortes. Por cada
+fila del CSV crea una figura con ventana HU, imagen filtrada y recorte:
+
+```text
+results/figures/preprocess_case_003_slice_042.png
+```
+
+Los índices del nombre son ejemplos. El script exporta figuras PNG, no arrays
+de preprocesamiento ni máscaras tumorales.
+
+## 7. API de preprocesamiento
+
+`preprocess_slice(slice_hu, liver_mask, cfg)` acepta la configuración completa
+o directamente el bloque de preprocesamiento y devuelve:
+
+| Clave | Contenido |
+| --- | --- |
+| `windowed` | Imagen recortada a la ventana HU y normalizada en `[0,1]` |
+| `denoised` | Imagen completa filtrada |
+| `enhanced` | Imagen completa con realce opcional |
+| `cropped` | Recorte de `enhanced` alrededor del hígado |
+| `crop_box` | Límites `(x0, y0, x1, y1)`, con extremos superiores exclusivos |
+
+La ventana actual cubre `[-140, 260] HU`. Se admiten filtros `median`,
+`gaussian` y `bilateral`; el realce admite `none`, `histogram_equalization`
+y `clahe`. El recorte agrega el margen configurado sin salir de la imagen.
+Una máscara hepática vacía provoca `ValueError` porque no se puede definir
+su caja de recorte.
+
+Las funciones de ventana, filtros, realce y recorte también pueden usarse
+por separado. Para reconstruir coordenadas desde un recorte, sumar su origen
+`(x0, y0)`. Para la segmentación base se usa `denoised`, que conserva la
+forma original y evita necesitar esa reconstrucción.
+
+## 8. API de segmentación
+
+```python
+segment_slice(image, liver_mask, settings) -> np.ndarray
+```
+
+Recibe una imagen 2D real, finita y normalizada en `[0,1]`, una máscara
+hepática binaria de igual forma y un diccionario de parámetros. Devuelve una
+máscara booleana de la misma forma. No modifica entradas ni usa la referencia
+tumoral.
+
+| Parámetro | Predeterminado | Opciones o condición |
+| --- | --- | --- |
+| `method` | `global` | `global`, `otsu`, `statistical` |
+| `threshold` | 0.45 | Número finito en `[0,1]` |
+| `k` | 1.0 | Número finito no negativo |
+| `direction` | `lower` | `lower`, `upper`; afecta solo al método estadístico |
+| `opening` | `False` | Booleano |
+| `closing` | `False` | Booleano |
+| `fill_holes` | `False` | Booleano |
+| `footprint` | `disk` | `disk`, `square` |
+| `radius` | 1 | Entero positivo |
+| `min_area` | 0 | Entero no negativo, en píxeles; 0 desactiva el filtro |
+
+Un diccionario vacío utiliza todos los valores predeterminados. Las claves
+desconocidas y los valores inválidos generan `ValueError`, incluso si el
+parámetro no interviene en el método elegido.
+
+### Umbrales
+
+- **Global:** `image < threshold` dentro del hígado.
+- **Otsu:** calcula el umbral únicamente con intensidades hepáticas y selecciona
+  las inferiores a ese umbral.
+- **Estadístico:** calcula media y desvío poblacional (`ddof=0`) en la región
+  hepática. Selecciona `image < media - k*desvío` para `lower`, o
+  `image > media + k*desvío` para `upper`.
+
+Todas las comparaciones son estrictas: la igualdad con el umbral queda fuera.
+Los valores iniciales no han sido ajustados mediante experimentos.
+
+El módulo no recibe HU. Convertir un umbral HU con
+`(HU - límite_inferior) / ancho` antes de llamar; con la ventana actual,
+`40 HU` corresponde a `0.45`. La conversión solo produce un umbral válido
+para esta API si queda en `[0,1]`; el módulo no lo recorta automáticamente.
+
+### Posprocesamiento y casos especiales
+
+Orden: umbralización → apertura → cierre → relleno de huecos → filtro de
+componentes. Cada operación es opcional. Apertura y cierre comparten el
+elemento estructurante: disco de radio `radius` o cuadrado de lado
+`2*radius + 1`. Los bordes externos de la imagen se consideran fondo.
+
+La máscara se restringe al hígado después de cada operación morfológica.
+Los componentes y el relleno usan 8 vecinos. Se conservan componentes de
+área mayor o igual a `min_area`. El tamaño está en píxeles, no en mm².
+
+Tras validar entradas y parámetros, un hígado vacío produce una máscara
+vacía. Las intensidades hepáticas constantes producen una máscara vacía
+con Otsu y el método estadístico; el global sigue comparando con su umbral.
+
+## 9. API de métricas
+
+```python
+dice_score(pred, reference) -> float
+iou_score(pred, reference) -> float
+```
+
+Aceptan máscaras binarias 2D o 3D con formas idénticas. Se admiten booleanos
+y valores numéricos exactamente 0/1. No realizan broadcasting, recorte ni
+redimensionamiento. Rechazan valores no binarios y no finitos.
+
+Sean `P` la predicción y `R` la referencia:
+
+- Dice: `2 * |P ∩ R| / (|P| + |R|)`.
+- IoU: `|P ∩ R| / |P ∪ R|`.
+- Ambas vacías: `1.0` en ambas métricas.
+- Solo una vacía: `0.0`.
+
+Se cuenta el conjunto de elementos de toda la máscara sin promediar por corte
+y sin agregar épsilon. Ambas funciones son puras y devuelven un `float` en
+`[0,1]`. Si las formas difieren, lanzan `ValueError` con ambas formas en el
+mensaje. Formas iguales no garantizan alineación espacial: esa correspondencia
+debe conservarla quien llama a la función.
+
+## 10. Ejemplo integrado de uso manual
+
+Ejecutar este código desde la raíz con el entorno activado, en Python o en
+un notebook. Requiere haber generado previamente el CSV de selección.
+Procesa un único corte y muestra sus métricas; no guarda archivos.
+
+```python
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+sys.path.insert(0, str(Path.cwd() / "src"))
+
+from psib.config import load_config
+from psib.data_io import get_slice, load_case
+from psib.preprocessing import preprocess_slice
+from psib.segmentation import segment_slice
+from psib.metrics import dice_score, iou_score
+
+cfg = load_config(Path.cwd() / "config.yaml")
+selected = pd.read_csv(Path(cfg["_output_dir"]) / "selected_cases_slices.csv")
+row = selected.iloc[0]
+ct, seg, spacing = load_case(int(row.case_id), cfg["data_dir"])
+k = int(row.slice_index)
+slice_hu = get_slice(ct, k)
+labels = get_slice(seg, k)
+liver = labels > 0
+reference = labels == 2
+processed = preprocess_slice(slice_hu, liver, cfg)
+
+settings = {"method": "statistical", "k": 1.0, "direction": "lower"}
+prediction = segment_slice(processed["denoised"], liver, settings)
+print({
+    "case_id": int(row.case_id),
+    "slice_index": k,
+    "dice": dice_score(prediction, reference),
+    "iou": iou_score(prediction, reference),
+})
+```
+
+Si el corte no contiene hígado, no puede usarse `preprocess_slice` porque
+intenta recortarlo. El ejecutor futuro deberá definir explícitamente cómo
+manejar esos cortes; la función de segmentación sí admite una región vacía.
+
+## 11. Notebooks y tests
+
+`00_dataset_exploration.ipynb` contiene celdas de inventario y selección de
+casos. `01_preprocessing.ipynb` carga el CSV de selección y compara filtros
+y recortes. Son ejemplos de exploración y preprocesamiento, no ejecutores
+del barrido de segmentación. Abrirlos desde la raíz o desde `notebooks/`,
+respetando el cálculo de `ROOT` de sus celdas iniciales.
+
+```bash
+python -m jupyterlab
+python -m unittest
+python -m unittest tests.test_metrics
+python -m unittest tests.test_segmentation
+python -m pip check
+```
+
+| Archivo de tests | Cobertura principal |
+| --- | --- |
+| `test_data_io.py` | Pares NIfTI sintéticos, orientación, espaciado y caso faltante |
+| `test_dataset.py` | Muestreo, volumen físico, componentes y selección reproducible |
+| `test_preprocessing.py` | Ventana, coordenadas de recorte, forma y dtype de filtros |
+| `test_metrics.py` | Casos idénticos, disjuntos, vacíos, solapamiento y validación |
+| `test_segmentation.py` | Umbrales, región hepática, morfología, conectividad y contrato |
+
+La suite contiene 29 tests y no requiere los datos reales. Estos tests no
+sustituyen una evaluación de calidad de segmentación ni una prueba completa
+de los tres scripts sobre todos los volúmenes.
+
+## 12. Errores habituales y límites de la revisión
+
+| Situación | Causa o acción |
+| --- | --- |
+| `ModuleNotFoundError: psib` al usar la API | Agregar `src/` al path, como en el ejemplo; los scripts ya lo hacen |
+| No se encuentra un par CT/máscara | Revisar `data_dir`, nombres y existencia de ambos archivos |
+| Formas, afines o espaciados incompatibles | Comprobar que CT y máscara pertenezcan al mismo caso y geometría |
+| Falta `dataset_inventory.csv` | Ejecutar primero `explore_dataset.py` |
+| Falta `selected_cases_slices.csv` | Ejecutar la selección antes del preprocesamiento |
+| No se pueden formar los terciles | Revisar pool y empates en volúmenes tumorales |
+| No hay casos multilesión | La selección actual exige al menos uno |
+| No se puede recortar una máscara vacía | Revisar el corte elegido o tratarlo antes del recorte |
+| Valores HU enviados a segmentación | Usar la imagen normalizada `denoised` |
+| Formas distintas en segmentación o métricas | Conservar las coordenadas completas o reconstruir el recorte; no redimensionar para ocultar el desajuste |
+
+La revisión incluyó los módulos, scripts, configuración, notebooks y tests.
+Se verificó la suite sintética; no se ejecutó aquí el procesamiento completo
+de los datos reales ni se midió el desempeño tumoral.
+
+Detalles a considerar en trabajos futuros:
+
+- La validación de etiquetas NIfTI convierte a `uint8` antes de comprobar
+  el conjunto `{0,1,2}`; no debe asumirse como una validación exhaustiva de
+  etiquetas arbitrarias fuera de rango.
+- Algunos textos de exploración fijan el contexto de 131 casos etiquetados;
+  si se usa otra base, ese texto no describe necesariamente su tamaño.
+- No hay tests específicos de precedencia de configuración ni cobertura de
+  todas las validaciones de NIfTI; las garantías de tests son las indicadas arriba.
+
+## 13. Interpretación experimental y próximos pasos
+
+El estudio es 2D sobre cortes seleccionados con las referencias, dentro de
+una región hepática conocida. La referencia tumoral se usa para selección
+y evaluación, pero no se entrega al algoritmo de segmentación.
+
+El ajuste previsto sobre los mismos 10 casos será exploratorio. Una métrica
+por caso sobre esos cortes no equivale a evaluar el volumen completo. La
+evaluación posterior en una base más grande deberá excluir los casos usados
+en el ajuste y conservar la configuración elegida para esa evaluación.
+
+Queda implementar el ejecutor de segmentación, la exportación de máscaras y
+tablas por corte/caso, el barrido reproducible de parámetros y el registro de
+resultados reales en las notas del estudio. Todavía no hay resultados de ese
+estudio que permitan afirmar qué método o parámetros funcionan mejor.
