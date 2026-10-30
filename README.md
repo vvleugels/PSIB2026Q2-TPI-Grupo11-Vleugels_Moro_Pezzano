@@ -154,4 +154,4 @@ weight cases equally. These are exploratory results with known liver regions,
 not an independent full-volume evaluation.
 
 See [documentation.md](documentation.md) for output schemas and failure handling,
-and [experiment notes](docs/notas_segmentacion.md) for measured comparisons.
+and [experiment notes](notas_segmentacion.md) for measured comparisons.

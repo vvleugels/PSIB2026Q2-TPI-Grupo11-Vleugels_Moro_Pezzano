@@ -37,7 +37,7 @@ consultar este documento junto con el código y los tests.
 | `scripts/` | Exploración, selección, figuras y experimentos de segmentación |
 | `notebooks/` | Ejemplos interactivos de exploración y preprocesamiento |
 | `tests/` | Tests sintéticos con `unittest` |
-| `docs/notas_segmentacion.md` | Alcance y criterios metodológicos del estudio |
+| `notas_segmentacion.md` | Alcance y criterios metodológicos del estudio |
 | `data/` | Datos locales, ignorados por Git |
 | `results/` | Tablas y figuras generadas, ignoradas por Git |
 
@@ -448,7 +448,7 @@ de los tres scripts sobre todos los volúmenes.
 
 La revisión incluyó los módulos, scripts, configuración, notebooks y tests.
 La revisión se complementa con la suite sintética y los experimentos locales
-registrados en `docs/notas_segmentacion.md`.
+registrados en `notas_segmentacion.md`.
 
 Detalles a considerar en trabajos futuros:
 
