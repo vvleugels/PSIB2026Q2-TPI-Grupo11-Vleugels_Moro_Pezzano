@@ -18,6 +18,7 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 | Dice e IoU | Implementados como API Python |
 | Características geométricas y textura GLCM 2D | Implementadas como API Python |
 | Tablas de características para cortes seleccionados | Implementadas como script |
+| Boxplots de textura entre regiones de referencia | Implementados como script |
 | Cuantificación de lesiones 3D | Pendiente |
 | Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Implementado |
 | Barrido de 252 configuraciones y comparación exploratoria | Implementado |
@@ -43,6 +44,7 @@ cuantificación 3D, compresión y reconstrucción siguen pendientes.
 | `src/psib/metrics.py` | Dice e IoU entre máscaras binarias |
 | `src/psib/features.py` | Características geométricas por lesión y textura GLCM 2D |
 | `scripts/extract_features.py` | Tablas de características para cortes seleccionados |
+| `scripts/plot_features.py` | Boxplots descriptivos de propiedades GLCM por tejido |
 | `src/psib/visualization.py` | Contornos de predicción y referencia sobre CT |
 | `scripts/run_tpi.py` | Selección 2D y segmentación base con ID temporal |
 | `scripts/select_slices_2d.py` | Selección con lectura de máscaras por planos |
@@ -771,6 +773,7 @@ Desde la raíz del repositorio y después de generar `<output_dir>/selected_case
 
 ```bash
 python scripts/extract_features.py
+python scripts/plot_features.py
 ```
 
 El script lee cada corte seleccionado con `iter_case_slices`, prepara la imagen
@@ -788,6 +791,13 @@ normalizada mediante `prepare_denoised_slice` y escribe estos archivos en
 propiedades sin pares válidos son NaN. En la tabla de resumen, `n_slices` ignora
 esos valores NaN para cada propiedad. Las máscaras de referencia definen ambas
 regiones, por lo que la comparación de tejidos es descriptiva.
+
+El segundo comando lee `texture_per_region.csv` y guarda
+`figures/glcm_tissue_comparison.png`, con cuatro paneles: contraste,
+homogeneidad, energía y correlación. Cada caja resume los cortes con valores
+finitos para esa combinación de región y propiedad; la línea es la mediana, el
+triángulo es la media y el tamaño muestral aparece en el eje horizontal. El
+gráfico es descriptivo y no incluye pruebas de significancia.
 
 El comando acepta `--config ruta/a/config.yaml`. Usa el `data_dir` configurado
 sin aplicar el fallback del lanzador; corregir esa ruta si fue necesario el fallback.

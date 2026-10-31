@@ -174,12 +174,15 @@ To build comparison tables for the selected slices, run:
 
 ```bash
 python scripts/extract_features.py
+python scripts/plot_features.py
 ```
 
 The command reads `<output_dir>/selected_cases_slices.csv` and writes
 `texture_per_region.csv`, `texture_summary.csv`, and `tumor_geometry.csv` under
 `<output_dir>/features/`. The summary reports per-slice means and population standard
-deviations; it does not perform statistical hypothesis tests.
+deviations; it does not perform statistical hypothesis tests. The second
+command writes a four-panel boxplot to
+`<output_dir>/features/figures/glcm_tissue_comparison.png`.
 
 The command accepts `--config path/to/config.yaml` and uses the configured
 data directory directly, without launcher fallback. Segmentation and features
@@ -224,6 +227,7 @@ denoised images, without enhancement or cropping.
 | `scripts/select_slices_2d.py` | Seeded case selection and slice ranking using 2D reads |
 | `scripts/run_segmentation.py` | Baseline experiments and parameter sweeps |
 | `scripts/extract_features.py` | Per-region texture, summary, and tumor geometry tables |
+| `scripts/plot_features.py` | Descriptive GLCM boxplots by reference region |
 | `scripts/compare_filters.py` | First-selected-slice denoising comparison |
 | `scripts/explore_dataset.py` | Volume inventory and context figures |
 | `scripts/select_cases.py` | Volume-stratified case and slice selection |
