@@ -184,7 +184,10 @@ valid selected slices within each case and region. The second command writes
 per-slice and per-case four-panel comparisons under
 `<output_dir>/features/figures/`. Per-case means still describe selected slices,
 not complete patient volumes; the plots are descriptive and perform no
-hypothesis tests.
+hypothesis tests. The extractor also writes per-case paired differences
+(tumor minus healthy liver) to `texture_case_differences.csv` and their summary
+to `texture_difference_summary.csv`. The summary reports their direction and
+spread; it does not calculate p-values.
 
 The command accepts `--config path/to/config.yaml` and uses the configured
 data directory directly, without launcher fallback. Segmentation and features

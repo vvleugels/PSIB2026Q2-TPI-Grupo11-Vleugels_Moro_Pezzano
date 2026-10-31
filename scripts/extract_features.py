@@ -81,6 +81,47 @@ def summarize_texture_by_case(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns)
 
 
+def summarize_paired_texture_differences(case_frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Calculate tumor-minus-healthy differences for cases with both regions."""
+    details = []
+    summaries = []
+    for property_name in TEXTURE_PROPERTIES:
+        pivot = case_frame.pivot(index="case_id", columns="region", values=property_name)
+        if not all(region in pivot.columns for region, _ in REGIONS):
+            paired = pd.DataFrame(columns=[region for region, _ in REGIONS])
+        else:
+            paired = pivot.dropna(subset=[region for region, _ in REGIONS])
+        differences = paired[REGIONS[0][0]] - paired[REGIONS[1][0]]
+        for case_id, row in paired.iterrows():
+            details.append({
+                "case_id": int(case_id),
+                "feature": property_name,
+                "tumor_reference": float(row[REGIONS[0][0]]),
+                "healthy_liver_reference": float(row[REGIONS[1][0]]),
+                "difference_tumor_minus_liver": float(row[REGIONS[0][0]] - row[REGIONS[1][0]]),
+            })
+        summaries.append({
+            "feature": property_name,
+            "n_pairs": int(len(differences)),
+            "mean_difference": float(differences.mean()) if len(differences) else float("nan"),
+            "median_difference": float(differences.median()) if len(differences) else float("nan"),
+            "std_difference": float(differences.std(ddof=0)) if len(differences) else float("nan"),
+            "n_tumor_higher": int((differences > 0).sum()),
+            "n_liver_higher": int((differences < 0).sum()),
+            "n_equal": int((differences == 0).sum()),
+        })
+    detail_columns = (
+        "case_id", "feature", "tumor_reference", "healthy_liver_reference",
+        "difference_tumor_minus_liver",
+    )
+    summary_columns = (
+        "feature", "n_pairs", "mean_difference", "median_difference", "std_difference",
+        "n_tumor_higher", "n_liver_higher", "n_equal",
+    )
+    return (pd.DataFrame(details, columns=detail_columns),
+            pd.DataFrame(summaries, columns=summary_columns))
+
+
 def extract_features(config_path: str | Path | None = None) -> Path:
     """Write per-region texture, per-tumor geometry, and summary CSV tables."""
     cfg = load_config(config_path)
@@ -126,11 +167,14 @@ def extract_features(config_path: str | Path | None = None) -> Path:
     geometry_frame = pd.DataFrame(geometry_rows, columns=geometry_columns)
     summary = summarize_texture(texture_frame)
     case_summary = summarize_texture_by_case(texture_frame)
+    paired_differences, difference_summary = summarize_paired_texture_differences(case_summary)
 
     texture_frame.to_csv(output_dir / "texture_per_region.csv", index=False)
     geometry_frame.to_csv(output_dir / "tumor_geometry.csv", index=False)
     summary.to_csv(output_dir / "texture_summary.csv", index=False)
     case_summary.to_csv(output_dir / "texture_per_case.csv", index=False)
+    paired_differences.to_csv(output_dir / "texture_case_differences.csv", index=False)
+    difference_summary.to_csv(output_dir / "texture_difference_summary.csv", index=False)
     print(f"Saved feature tables for {len(selection)} selected slices under {output_dir}", flush=True)
     return output_dir
 

@@ -20,6 +20,7 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 | Tablas de características para cortes seleccionados | Implementadas como script |
 | Boxplots de textura entre regiones de referencia | Implementados como script |
 | Resumen de textura por caso | Implementado como tabla y gráfico descriptivo |
+| Diferencias de textura emparejadas por caso | Implementadas como tablas descriptivas |
 | Cuantificación de lesiones 3D | Pendiente |
 | Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Implementado |
 | Barrido de 252 configuraciones y comparación exploratoria | Implementado |
@@ -786,6 +787,8 @@ normalizada mediante `prepare_denoised_slice` y escribe estos archivos en
 | `texture_per_region.csv` | Una fila por corte y ROI (`tumor_reference` o `healthy_liver_reference`), con área, conteo de píxeles y propiedades GLCM |
 | `texture_summary.csv` | Media y desvío estándar poblacional por región y propiedad, con cantidad de cortes válidos |
 | `texture_per_case.csv` | Una fila por caso y región, con medias de los cortes seleccionados y número de cortes válidos |
+| `texture_case_differences.csv` | Una fila por caso y propiedad, con textura tumoral menos textura de hígado sano |
+| `texture_difference_summary.csv` | Media, mediana, desvío poblacional y dirección de las diferencias entre casos emparejados |
 | `tumor_geometry.csv` | Una fila por componente tumoral 8-conectado, con características geométricas y ubicación de caso/corte |
 
 `pair_count` cuenta los pares espaciales válidos antes de simetrizar cada GLCM;
@@ -807,6 +810,12 @@ líneas las dos regiones medidas en el mismo caso. En los datos actuales hay 9
 pares completos: un caso no aporta textura tumoral calculable. Las cajas por
 caso muestran variación entre casos, pero no reemplazan una evaluación sobre
 volúmenes completos ni una prueba de significancia.
+
+Las dos tablas de diferencias incluyen solo casos con valores calculables para
+ambas regiones. La diferencia se define como tumor menos hígado sano; positiva
+indica que el descriptor fue mayor en tumor para ese caso. La tabla resumen
+describe magnitud y dirección entre los pares disponibles, sin prueba de
+significancia ni afirmación de separación generalizable.
 
 El comando acepta `--config ruta/a/config.yaml`. Usa el `data_dir` configurado
 sin aplicar el fallback del lanzador; corregir esa ruta si fue necesario el fallback.

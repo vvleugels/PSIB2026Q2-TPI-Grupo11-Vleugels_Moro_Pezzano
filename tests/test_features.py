@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from scripts.extract_features import summarize_texture_by_case
+from scripts.extract_features import summarize_paired_texture_differences, summarize_texture_by_case
 from psib.features import extract_geometric_features, extract_texture_features
 
 
@@ -28,6 +28,14 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(summary.loc[(1, "tumor_reference"), "contrast"], 2.0)
         self.assertEqual(summary.loc[(2, "tumor_reference"), "n_slices"], 0)
         self.assertTrue(np.isnan(summary.loc[(2, "tumor_reference"), "contrast"]))
+
+        paired, differences = summarize_paired_texture_differences(summary.reset_index())
+        contrast = differences.set_index("feature").loc["contrast"]
+        self.assertEqual(len(paired[paired.feature == "contrast"]), 1)
+        self.assertEqual(contrast.n_pairs, 1)
+        self.assertEqual(contrast.mean_difference, 1.5)
+        self.assertEqual(contrast.n_tumor_higher, 1)
+        self.assertEqual(contrast.n_liver_higher, 0)
 
     def test_geometry_reports_one_row_per_eight_connected_component(self):
         mask = np.zeros((8, 9), dtype=bool)
