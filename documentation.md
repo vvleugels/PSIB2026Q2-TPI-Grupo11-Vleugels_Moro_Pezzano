@@ -108,8 +108,10 @@ La ejecución nativa del archivo BAT no se ha verificado desde el entorno Linux.
 Para usar una interfaz gráfica, ejecutar `Run_TPI_GUI.bat`. Este lanzador
 prepara el mismo entorno virtual y abre `scripts/gui.py`, que permite elegir un
 YAML, iniciar el flujo 2D, seguir la salida del proceso y abrir la carpeta de
-resultados. El procesamiento corre en un hilo separado para que la ventana
-siga respondiendo.
+resultados. Al terminar, muestra las figuras PNG generadas para la corrida en
+un visor con navegación anterior/siguiente, ajuste a ventana, zoom y paneo.
+También carga las figuras de la última corrida completada al abrir la app. El
+procesamiento corre en un hilo separado para que la ventana siga respondiendo.
 
 La selección 2D y la segmentación base comparten la configuración resuelta.
 El identificador usa la hora local con formato `YYYYMMDD-HHMMSS`; las salidas

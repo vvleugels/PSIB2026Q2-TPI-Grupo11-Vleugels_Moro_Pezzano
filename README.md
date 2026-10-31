@@ -81,8 +81,11 @@ the automatic dependency checks are performed by `Run_TPI.bat`.
 
 Double-click `Run_TPI_GUI.bat` to open a small desktop interface. It lets you
 choose a YAML configuration, run the same 2D baseline workflow, follow its log,
-and open the result folder when it finishes. It uses the existing `.venv` and
-checks dependencies before opening the interface.
+and review the generated prediction figures in the app. The figure viewer has
+previous/next navigation, fit-to-window, zoom, and pan controls. It opens the
+latest completed run for the selected output directory when available. The
+launcher uses the existing `.venv` and checks dependencies before opening the
+interface.
 
 ## Data and configuration
 
