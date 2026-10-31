@@ -16,6 +16,8 @@ segmentación y sus tests presentes en el directorio de trabajo.
 | Preprocesamiento y exportación de figuras | Implementado |
 | Segmentación 2D y posprocesamiento | Implementado como API Python |
 | Dice e IoU | Implementados como API Python |
+| Características geométricas y textura GLCM 2D | Implementadas como API Python |
+| Cuantificación de lesiones 3D | Pendiente |
 | Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Implementado |
 | Barrido de 252 configuraciones y comparación exploratoria | Implementado |
 | Evaluación independiente con otra base | Pendiente |
@@ -34,6 +36,8 @@ consultar este documento junto con el código y los tests.
 | `src/psib/preprocessing.py` | Ventana HU, filtros, realce y recorte hepático |
 | `src/psib/segmentation.py` | Umbrales 2D, morfología y componentes conectados |
 | `src/psib/metrics.py` | Dice e IoU entre máscaras binarias |
+| `src/psib/visualization.py` | Superposición de contornos de predicción y referencia |
+| `src/psib/features.py` | Características geométricas por lesión y textura GLCM 2D |
 | `scripts/` | Exploración, selección, figuras y experimentos de segmentación |
 | `notebooks/` | Ejemplos interactivos de exploración y preprocesamiento |
 | `tests/` | Tests sintéticos con `unittest` |
@@ -456,8 +460,8 @@ Detalles a considerar en trabajos futuros:
   el conjunto `{0,1,2}`; no debe asumirse como una validación exhaustiva de
   etiquetas arbitrarias fuera de rango. El lector nuevo por cortes valida el
   rango antes de convertir a `uint8`.
-- Algunos textos de exploración fijan el contexto de 131 casos etiquetados;
-  si se usa otra base, ese texto no describe necesariamente su tamaño.
+- El README describe el tamaño del conjunto original de LiTS. El script de
+  exploración informa la cantidad de casos pareados disponibles en la ruta local.
 - El ejecutor prueba la precedencia de configuración local. No hay cobertura de
   todas las validaciones de NIfTI; las garantías de tests son las indicadas arriba.
 
@@ -577,3 +581,50 @@ python -m unittest tests.test_slice_io tests.test_run_segmentation tests.test_se
 
 Los NIfTI de prueba son fixtures sintéticos pequeños; no se realiza segmentación
 ni análisis de componentes 3D de los volúmenes reales.
+
+## 15. API de características geométricas y textura 2D
+
+El módulo `psib.features` extrae propiedades de máscaras en un corte axial. No
+calcula volumen 3D ni asocia automáticamente una lesión entre cortes.
+
+### Geometría por lesión
+
+`extract_geometric_features(tumor_mask, spacing)` recibe una máscara binaria 2D
+y el espaciado `(sx, sy)` en milímetros, siguiendo los ejes del array. Separa
+componentes conectados con conectividad de 8 y devuelve una fila por componente:
+
+| Columna | Significado |
+| --- | --- |
+| `component_id` | Etiqueta del componente en el corte |
+| `area_pixels` | Cantidad de píxeles de la lesión |
+| `area_mm2` | Superficie usando el área física de cada píxel |
+| `eccentricity` | Excentricidad de la elipse equivalente, entre 0 y 1 |
+| `solidity` | Cociente entre el área y el área convexa |
+| `max_diameter_mm` | Diámetro máximo de Feret en milímetros |
+| `centroid_x_mm`, `centroid_y_mm` | Centroide en coordenadas físicas del corte |
+
+El espaciado axial `sz` no interviene en medidas de una sola sección. Una
+máscara vacía devuelve una tabla sin filas y con las mismas columnas.
+
+### Textura GLCM en una región
+
+`extract_texture_features(image, roi_mask, levels=32, distances=(1,), angles=...)`
+recibe una imagen 2D normalizada a `[0, 1]` y una máscara binaria de la región
+de interés con la misma forma. La función cuantiza intensidades en 32 niveles
+por defecto y calcula matrices simétricas para cuatro direcciones en el plano
+(0°, 45°, 90° y 135°) a distancia de un píxel. Distancias, niveles y ángulos
+pueden configurarse.
+
+Solo cuenta pares donde ambos píxeles caen dentro de la región. Devuelve
+contraste, homogeneidad, energía y correlación, promediados entre los
+desplazamientos que contienen pares válidos. También devuelve `pair_count` y
+`n_offsets`. Si ningún desplazamiento contiene pares, las cuatro propiedades
+son NaN y ambos conteos son cero. Para comparar textura de las referencias,
+usar por separado `seg == 2` para tumor y `seg == 1` para hígado no tumoral, junto
+con la imagen filtrada normalizada.
+
+Estas características resumen una región en un corte; sus comparaciones son
+descriptivas cuando la región se define con máscaras de referencia. La API
+permite analizar tanto una referencia como una predicción, pero esta entrega no
+incluye todavía una tabla agregada de todos los casos ni una comparación
+estadística automatizada.

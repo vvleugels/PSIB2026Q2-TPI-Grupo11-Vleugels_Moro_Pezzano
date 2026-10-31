@@ -2,8 +2,9 @@
 
 Person A's classical image-processing work for liver tumor data: dataset loading,
 exploration, reference-mask-based case/slice selection, and preprocessing. Baseline 2D tumor segmentation, Dice/IoU metrics and a reproducible experiment
-runner are also available. Feature extraction, quantification, compression and
-reconstruction modules are not implemented. See [documentation.md](documentation.md)
+runner are also available. The feature API includes 2D geometric measurements
+and masked GLCM texture descriptors. 3D lesion quantification, compression and
+reconstruction are not implemented. See [documentation.md](documentation.md)
 for the complete current workflow.
 
 ## Install
@@ -90,6 +91,28 @@ millimetres along those same axes. NiBabel canonicalizes both CT and mask; shape
 canonical affine, spacing, and integer labels are checked before returning.
 `get_fdata()` applies NIfTI slope/intercept scaling to CT data.
 
+## Feature extraction (2D)
+
+`psib.features.extract_geometric_features(mask, spacing)` returns one row per
+8-connected lesion in a binary axial mask. It reports pixel and physical area,
+eccentricity, solidity, maximum Feret diameter in millimetres, and centroid in
+millimetres. Pass `(sx, sy)` from the case spacing; the axial slice spacing is
+not used for these 2D measurements.
+
+`psib.features.extract_texture_features(image, roi_mask)` computes contrast,
+homogeneity, energy, and correlation from a symmetric gray-level co-occurrence
+matrix. The image must be normalized to `[0, 1]`, such as the `denoised` output
+of preprocessing. The default uses 32 gray levels, distance 1, and four in-plane
+directions. A pixel pair contributes only when both pixels belong to `roi_mask`.
+Call it separately for tumor (`seg == 2`) and healthy liver (`seg == 1`) when
+comparing reference regions. A region with no valid neighboring pixel pairs
+returns NaN texture values and a pair count of zero.
+
+These measurements describe individual 2D slices. They do not yet calculate a
+3D lesion volume or track a lesion across slices. In the current experiment,
+reference masks also guide slice and region selection, so feature comparisons
+are descriptive and not an independent evaluation.
+
 ## Python files and ownership
 
 | File | Description | Owner |
@@ -99,6 +122,8 @@ canonical affine, spacing, and integer labels are checked before returning.
 | `src/psib/data_io.py` | Paired NIfTI discovery, orientation, spacing, volume loading | Person A |
 | `src/psib/dataset.py` | Inventory, tumor-burden case sampling, slice selection | Person A |
 | `src/psib/preprocessing.py` | HU window, denoising, enhancement, liver crop | Person A |
+| `src/psib/visualization.py` | Superposición de contornos de predicción y referencia | Person C |
+| `src/psib/features.py` | Geometría 2D por lesión y textura GLCM en una ROI | Person C |
 | `scripts/explore_dataset.py` | Inventory CSV and context figures | Person A |
 | `scripts/select_cases.py` | Selected case/slice CSV | Person A |
 | `scripts/preprocess_selected.py` | Selected-slice preprocessing figures | Person A |
@@ -114,9 +139,15 @@ canonical affine, spacing, and integer labels are checked before returning.
 - `psib.preprocessing.preprocess_slice(slice_hu, liver_mask, cfg)` returns
   `windowed`, `denoised`, `enhanced`, `cropped`, and `crop_box` values.
 
-Persons B and C can rely on these signatures. Add segmentation, metrics, feature
-extraction, and quantification in their own modules without changing these
-interfaces.
+Persons B and C can rely on these signatures. The feature API is:
+
+- `psib.features.extract_geometric_features(tumor_mask, spacing)` returns a
+  table with one row per 8-connected lesion in an axial mask.
+- `psib.features.extract_texture_features(image, roi_mask, ...)` returns GLCM
+  properties aggregated over valid distances and directions.
+
+Both functions operate on one 2D slice; they do not change the shared loading,
+selection, or preprocessing interfaces.
 
 ## Tests
 
