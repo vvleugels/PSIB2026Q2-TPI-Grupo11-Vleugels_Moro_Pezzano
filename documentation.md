@@ -21,7 +21,7 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 | Boxplots de textura entre regiones de referencia | Implementados como script |
 | Resumen de textura por caso | Implementado como tabla y gráfico descriptivo |
 | Diferencias de textura emparejadas por caso | Implementadas como tablas descriptivas |
-| Cuantificación de lesiones 3D | Pendiente |
+| Volumen tumoral y conteo de componentes 3D desde máscaras de referencia | Implementados en la exploración volumétrica opcional |
 | Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Implementado |
 | Barrido de 252 configuraciones y comparación exploratoria | Implementado |
 | Comparación de filtros sobre un corte y exportación sin GUI | Implementado |
@@ -31,9 +31,27 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 | Evaluación independiente con otra base | Pendiente |
 
 El flujo principal usa lectura por cortes 2D para limitar el consumo de memoria.
-El inventario volumétrico sigue disponible como flujo opcional. Las
-características geométricas y textura GLCM 2D están implementadas; la
-cuantificación 3D, compresión y reconstrucción siguen pendientes.
+El inventario volumétrico opcional calcula el volumen tumoral físico y el
+número de componentes conectados a partir de las máscaras de referencia. No
+genera una predicción tumoral 3D ni una reconstrucción de superficies.
+
+### Alcance mínimo y máximo
+
+El **objetivo mínimo** es segmentar y cuantificar en 2D los tumores de los
+cortes axiales seleccionados en los 10 casos etiquetados del subconjunto local.
+La configuración actual solicita 5 cortes por caso (hasta 50 en total) y
+separa los índices por un mínimo de 2 cortes; si esa separación lo impide,
+puede seleccionar menos. En esos cortes se calculan características
+geométricas y textura GLCM 2D. La segmentación compara umbrales globales, Otsu
+y estadísticos, además de variantes morfológicas, usando Dice e IoU frente a
+las máscaras de referencia.
+
+El **objetivo máximo** agrega un análisis morfológico descriptivo en 3D de las
+máscaras de referencia: volumen tumoral en cm³ y número de componentes
+conectados por caso. Se ejecuta como inventario volumétrico opcional; no incluye
+segmentación predictiva 3D ni visualización de superficies. Así, el
+procesamiento exhaustivo y la comparación de métodos se mantienen en 2D sobre
+los cortes seleccionados.
 
 ## 2. Estructura y responsabilidades
 
@@ -112,6 +130,8 @@ resultados. Al terminar, muestra las figuras PNG generadas para la corrida en
 un visor con navegación anterior/siguiente, ajuste a ventana, zoom y paneo.
 También carga las figuras de la última corrida completada al abrir la app. El
 procesamiento corre en un hilo separado para que la ventana siga respondiendo.
+La pestaña de actividad muestra un resumen de la última corrida al iniciar y
+la salida en vivo mientras se ejecuta una nueva.
 
 La selección 2D y la segmentación base comparten la configuración resuelta.
 El identificador usa la hora local con formato `YYYYMMDD-HHMMSS`; las salidas
@@ -588,18 +608,23 @@ Detalles a considerar en trabajos futuros:
 
 ## 13. Interpretación experimental y próximos pasos
 
-El estudio es 2D sobre cortes seleccionados con las referencias, dentro de
-una región hepática conocida. La referencia tumoral se usa para selección
-y evaluación, pero no se entrega al algoritmo de segmentación.
+El objetivo mínimo y máximo se definen en la sección 1. La segmentación y las
+características se calculan en cortes 2D; el componente 3D del objetivo máximo
+se limita a volumen y conteo de componentes de las máscaras de referencia.
+La referencia tumoral se usa para seleccionar cortes y evaluar, pero no se
+entrega al algoritmo de segmentación.
 
 El ajuste previsto sobre los mismos 10 casos será exploratorio. Una métrica
 por caso sobre esos cortes no equivale a evaluar el volumen completo. La
-evaluación posterior en una base más grande deberá excluir los casos usados
-en el ajuste y conservar la configuración elegida para esa evaluación.
+comparación usa Dice e IoU para más de una familia de umbralización (global,
+Otsu y estadística), con variantes morfológicas. La evaluación posterior en
+una base mayor deberá excluir los casos usados en el ajuste y conservar la
+configuración elegida para esa evaluación.
 
-El ejecutor y el barrido permiten comparar las variantes sobre los casos locales.
-Queda completar el barrido experimental y realizar la evaluación independiente
-con una base sin casos utilizados en el ajuste.
+El ejecutor y el barrido permiten la comparación exploratoria sobre los casos
+locales. Queda completar y analizar el barrido; la validación independiente en
+otra base se considera trabajo posterior y queda fuera de los resultados
+actuales.
 
 
 ## 14. Ejecutor de segmentación y barrido

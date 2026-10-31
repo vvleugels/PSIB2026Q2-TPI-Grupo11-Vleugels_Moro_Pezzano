@@ -459,6 +459,7 @@ class TpiLauncher:
                     self.results_dir = Path(result)
             elif kind == "error":
                 self.append_log(f"Error al iniciar el proceso: {value}")
+                self.log_meta.set("ERROR AL INICIAR")
                 self.set_status("Error al iniciar", "error")
                 finished = True
             elif kind == "done":

@@ -4,8 +4,9 @@ Python tools for exploring labeled liver CT data, selecting axial slices,
 comparing denoising filters, and running classical 2D tumor segmentation with
 Dice/IoU evaluation. Reusable code lives in `src/psib/`; runnable workflows live
 in `scripts/`. All workflows use Python scripts. Feature extraction includes
-2D geometry and masked GLCM texture descriptors. 3D lesion quantification,
-compression, and reconstruction are not implemented.
+2D geometry and masked GLCM texture descriptors. The optional volumetric
+inventory summarizes 3D tumor volume and connected-component count from the
+reference masks; the segmentation pipeline itself remains 2D.
 
 See [documentation.md](documentation.md) for the detailed Spanish guide,
 API contracts, output schemas, and experimental limitations.
@@ -83,9 +84,10 @@ Double-click `Run_TPI_GUI.bat` to open a small desktop interface. It lets you
 choose a YAML configuration, run the same 2D baseline workflow, follow its log,
 and review the generated prediction figures in the app. The figure viewer has
 previous/next navigation, fit-to-window, zoom, and pan controls. It opens the
-latest completed run for the selected output directory when available. The
-launcher uses the existing `.venv` and checks dependencies before opening the
-interface.
+latest completed run for the selected output directory when available. Its
+activity tab shows the latest run summary on startup and live output while a
+new run is processing. The launcher uses the existing `.venv` and checks
+dependencies before opening the interface.
 
 ## Data and configuration
 
@@ -112,6 +114,24 @@ All selection uses reference masks. Segmentation also uses the known liver
 region; tumor references are used for selection and evaluation, not as inputs
 to the tumor segmentation algorithm. These results are exploratory examples,
 not an independent full-volume evaluation.
+
+## Scope based on the instructor's feedback
+
+The **minimum objective** is to segment and quantify tumors in 2D on axial
+slices from the configured 10 labeled cases. The current configuration requests
+up to 5 slices per case (up to 50 total), with a minimum gap between slices.
+Segmentation variants are compared with Dice and IoU against reference masks;
+2D geometric and GLCM features describe the selected regions.
+
+The **maximum objective** adds descriptive 3D morphology from the reference
+masks: physical tumor volume and the number of connected tumor components per
+case. This is available through the optional volumetric inventory. It does not
+extend the prediction pipeline to 3D. The detailed segmentation, features, and
+figures remain 2D to keep computation bounded.
+
+The selected slices are chosen using reference masks, and the same cases are
+used for the exploratory comparison. Dice/IoU and feature summaries therefore
+do not represent independent validation on unseen volumes.
 
 ## Manual selection and experiments
 
