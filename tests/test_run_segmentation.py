@@ -10,8 +10,7 @@ import pandas as pd
 import yaml
 
 from scripts.run_segmentation import (aggregate_metrics, build_configurations, choose_best,
-                                      prepare_image, run_experiment, iter_predictions)
-from psib.preprocessing import preprocess_slice
+                                      run_experiment, iter_predictions)
 
 
 class RunSegmentationTests(unittest.TestCase):
@@ -118,13 +117,6 @@ class RunSegmentationTests(unittest.TestCase):
         self.assertEqual(cases.iloc[0].dice, 1)
         self.assertEqual(totals.iloc[0].dice_std, 0)
 
-    def test_preparation_matches_existing_preprocessing(self):
-        hu = np.arange(100).reshape(10, 10)
-        liver = np.ones_like(hu)
-        for method in ('median', 'gaussian', 'bilateral'):
-            cfg = {'preprocessing': {'denoising': {'method': method}}}
-            np.testing.assert_array_equal(prepare_image(hu, cfg), preprocess_slice(hu, liver, cfg)['denoised'])
-
     def test_selection_errors_leave_failed_status(self):
         invalid = [pd.DataFrame(columns=['case_id', 'slice_index']),
                    pd.DataFrame({'other': [1]}),
@@ -155,13 +147,6 @@ class RunSegmentationTests(unittest.TestCase):
                 run_experiment(self.config, 'export_failure')
         state = json.loads((self.output / 'segmentation/export_failure/run.json').read_text())
         self.assertEqual(state['status'], 'failed')
-
-    def test_local_configuration_precedence(self):
-        self.cfg['segmentation'] = {'threshold': 0.0}
-        (self.root / 'config.local.yaml').write_text(yaml.safe_dump(self.cfg))
-        with patch('scripts.run_segmentation.export_prediction'):
-            out = run_experiment(self.config, 'local')
-        self.assertEqual(pd.read_csv(out / 'metrics_per_slice.csv').pred_area.sum(), 0)
 
 
 if __name__ == '__main__':

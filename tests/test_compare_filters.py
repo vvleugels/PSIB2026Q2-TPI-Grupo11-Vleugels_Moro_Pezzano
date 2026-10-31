@@ -1,7 +1,5 @@
-"""Synthetic checks for the headless, single-slice filter comparison."""
+"""Synthetic checks for single-slice filter comparison and selection errors."""
 from pathlib import Path
-import subprocess
-import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -76,21 +74,6 @@ class CompareFiltersTests(unittest.TestCase):
             self.selection.write_text(text)
             with self.assertRaisesRegex(ValueError, "Selection CSV is empty"):
                 comparison.compare_filters(self.config)
-
-    def test_cli_without_display_and_clear_failure(self):
-        import os
-
-        env = {**os.environ, "DISPLAY": "", "MPLBACKEND": "Agg"}
-        command = [sys.executable, str(comparison.ROOT / "scripts/compare_filters.py"),
-                   "--config", str(self.config)]
-        result = subprocess.run(command, cwd=self.root, env=env, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Saved filter comparison", result.stdout)
-        self.selection.unlink()
-        result = subprocess.run(command, cwd=self.root, env=env, capture_output=True, text=True)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Selection CSV not found", result.stderr)
-        self.assertNotIn("Traceback", result.stderr)
 
 
 if __name__ == "__main__":

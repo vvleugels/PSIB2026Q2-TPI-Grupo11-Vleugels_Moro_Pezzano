@@ -6,8 +6,8 @@ El proyecto permite explorar tomografías de hígado etiquetadas, seleccionar
 casos y cortes axiales, preprocesarlos y aplicar métodos clásicos de
 segmentación de posibles tumores. También incluye métricas Dice e IoU.
 
-Esta documentación describe el código actual, incluidos los módulos de
-segmentación y sus tests presentes en el directorio de trabajo.
+Los flujos se ejecutan mediante scripts Python. `src/psib/` contiene la
+lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 
 | Capacidad | Estado |
 | --- | --- |
@@ -21,11 +21,15 @@ segmentación y sus tests presentes en el directorio de trabajo.
 | Cuantificación de lesiones 3D | Pendiente |
 | Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Implementado |
 | Barrido de 252 configuraciones y comparación exploratoria | Implementado |
+| Comparación de filtros sobre un corte y exportación sin GUI | Implementado |
+| Lanzador con fallback de datos e identificadores temporales | Implementado |
+| Superposición de contornos de predicción y referencia | Disponible como API Python |
 | Evaluación independiente con otra base | Pendiente |
 
-La introducción del README y algunas notas históricas describen la etapa inicial,
-anterior a los módulos de segmentación y métricas. Para el estado funcional actual,
-consultar este documento junto con el código y los tests.
+El flujo principal usa lectura por cortes 2D para limitar el consumo de memoria.
+El inventario volumétrico sigue disponible como flujo opcional. Las
+características geométricas y textura GLCM 2D están implementadas; la
+cuantificación 3D, compresión y reconstrucción siguen pendientes.
 
 ## 2. Estructura y responsabilidades
 
@@ -37,10 +41,17 @@ consultar este documento junto con el código y los tests.
 | `src/psib/preprocessing.py` | Ventana HU, filtros, realce y recorte hepático |
 | `src/psib/segmentation.py` | Umbrales 2D, morfología y componentes conectados |
 | `src/psib/metrics.py` | Dice e IoU entre máscaras binarias |
-| `src/psib/visualization.py` | Superposición de contornos de predicción y referencia |
 | `src/psib/features.py` | Características geométricas por lesión y textura GLCM 2D |
 | `scripts/extract_features.py` | Tablas de características para cortes seleccionados |
-| `scripts/` | Exploración, selección, figuras y experimentos de segmentación |
+| `src/psib/visualization.py` | Contornos de predicción y referencia sobre CT |
+| `scripts/run_tpi.py` | Selección 2D y segmentación base con ID temporal |
+| `scripts/select_slices_2d.py` | Selección con lectura de máscaras por planos |
+| `scripts/run_segmentation.py` | Ejecuciones base y barrido de parámetros |
+| `scripts/compare_filters.py` | Comparación de mediana, gaussiano y bilateral |
+| `scripts/explore_dataset.py` | Inventario volumétrico y figuras de contexto |
+| `scripts/select_cases.py` | Selección por terciles de volumen tumoral |
+| `scripts/preprocess_selected.py` | Figuras de ventana, filtrado y recorte |
+| `Run_TPI.bat` | Preparación del entorno Windows y llamada al lanzador Python |
 | `tests/` | Tests sintéticos con `unittest` |
 | `data/` | Datos locales, ignorados por Git |
 | `results/` | Tablas y figuras generadas, ignoradas por Git |
@@ -60,7 +71,8 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-Si `.venv` ya existe, alcanza con activarlo. Comprobar el intérprete con
+Si `.venv` ya existe, activarlo y volver a instalar los requisitos si cambiaron.
+Comprobar el intérprete con
 `python --version`. El entorno virtual puede coexistir con otra versión de
 Python instalada en el sistema.
 
@@ -75,11 +87,16 @@ python -m pip install -r requirements.txt
 No copiar el entorno virtual entre sistemas operativos.
 
 En Windows se puede ejecutar `Run_TPI.bat` con doble clic. Crea `.venv` si
-falta y, en cada ejecución, instala los requisitos faltantes o desactualizados
-y ejecuta `pip check`. Luego llama a `scripts/run_tpi.py`, que usa `data_dir`
+falta y, en cada ejecución, ejecuta `pip install -r requirements.txt`
+y `pip check`. Conserva los paquetes que ya satisfacen las restricciones; no
+actualiza todos los paquetes a la última versión. Luego llama a
+`scripts/run_tpi.py`, que usa `data_dir`
 con la precedencia habitual de `config.local.yaml`. Si no encuentra pares
 CT/máscara, intenta `data/Selected_database/`; si tampoco encuentra pares allí,
 termina con un error. No modifica los archivos YAML del usuario.
+
+Instalar Python 3.12 de 64 bits con el lanzador `py` para crear el entorno.
+La ejecución nativa del archivo BAT no se ha verificado desde el entorno Linux.
 
 La selección 2D y la segmentación base comparten la configuración resuelta.
 El identificador usa la hora local con formato `YYYYMMDD-HHMMSS`; las salidas
@@ -145,6 +162,7 @@ auxiliares cuyo nombre empieza con `._` se ignoran. `imagesTs/` no participa.
 | `load_case(case_id, data_dir=None)` | `(ct_hu, seg, spacing)`; CT `float32`, etiquetas `uint8` |
 | `load_segmentation(case_id, data_dir=None)` | Solo las etiquetas canónicas, evitando cargar todo el CT |
 | `get_slice(volume, k)` | Corte 2D de un volumen 3D; error si `k` está fuera de rango |
+| `iter_case_slices(case_id, slice_indices=None, data_dir=None, *, mask_only=False)` | Iterador de `(k, ct_2d, seg_2d, spacing)` sin cargar volúmenes completos |
 
 `load_case` comprueba forma, matriz afín canónica, espaciado e integridad de
 etiquetas. La carga de intensidades aplica la escala e intercepto del NIfTI
@@ -152,7 +170,7 @@ mediante `get_fdata()`. Si se omite `data_dir`, se utiliza la configuración.
 
 ## 5. Configuración
 
-Los scripts leen `config.yaml` desde la raíz. Si existe un archivo hermano
+Por defecto, los scripts leen `config.yaml` desde la raíz. Si existe un archivo hermano
 `config.local.yaml`, se carga ese archivo **en reemplazo completo** del base:
 no hay combinación recursiva. Para mantener los valores del proyecto al
 personalizar rutas, copiar primero el YAML completo.
@@ -185,17 +203,56 @@ Valores del YAML base:
 | `preprocessing.enhancement.clahe_kernel_size` | 8 | Tamaño de región CLAHE |
 | `preprocessing.crop_margin` | 8 | Margen del recorte en píxeles |
 
-El bloque `segmentation` contiene los valores de la sección 8. El nuevo ejecutor
-admite `--config`; los tres scripts anteriores mantienen su configuración fija
-en la raíz. Se conserva la precedencia completa de `config.local.yaml`.
+El bloque `segmentation` contiene los valores de la sección 8. Admiten
+`--config`: `run_tpi.py`, `select_slices_2d.py`, `run_segmentation.py`,
+`compare_filters.py` y `extract_features.py`. `explore_dataset.py`, `select_cases.py` y
+`preprocess_selected.py` usan el YAML de la raíz. Todos conservan la precedencia
+completa de `config.local.yaml`.
 
-## 6. Flujo ejecutable y archivos de salida
+`candidate_pool_size` se utiliza solo en el inventario volumétrico. La selección
+2D usa `n_cases`, `slices_per_case`, `minimum_slice_gap` y `seed` sin calcular
+terciles ni componentes 3D. El fallback de datos pertenece únicamente a
+`run_tpi.py`; los scripts individuales usan `data_dir` directamente.
 
-El flujo original siguiente carga volúmenes completos y cuenta componentes 3D.
-**No se ejecutará en esta PC por su consumo de memoria.** Para la ejecución
-actual usar la selección 2D y el ejecutor de la sección 14.
+## 6. Flujos ejecutables y archivos de salida
 
-Flujo original, reservado para una máquina con recursos suficientes:
+### Flujo principal: selección 2D y segmentación base
+
+Con el entorno activado y los requisitos instalados:
+
+```bash
+python scripts/run_tpi.py
+# Alternativa con configuración propia:
+python scripts/run_tpi.py --config ruta/a/config.yaml
+```
+
+El lanzador busca pares en el `data_dir` efectivo. Si no hay pares, intenta
+`data/Selected_database/` bajo la raíz del repositorio. Si tampoco hay pares
+allí, falla antes de seleccionar. El fallback también se aplica a una carpeta
+existente pero vacía; no corrige datos corruptos ni una selección incompatible
+con la cantidad de casos disponibles.
+
+Regenera `<output_dir>/selected_cases_slices.csv` y ejecuta segmentación base
+con un ID de hora local como `20261031-180409`. Comprueba que la carpeta de
+esa ejecución no exista antes de regenerar la selección. No ejecuta barridos,
+comparación de filtros ni inventario 3D. Cada lanzamiento vuelve a seleccionar;
+para reutilizar una selección, usar el ejecutor manual de la sección 14.
+
+Ambas etapas reciben una configuración temporal con rutas absolutas y el mismo
+`data_dir` resuelto. No se modifica el YAML del usuario. Para reproducir una
+corrida, consultar `effective_config.yaml`: la ruta de configuración registrada
+en `run.json` apunta a ese archivo temporal, eliminado al terminar el lanzador.
+Los scripts individuales no aplican fallback; si se utilizó, corregir `data_dir`
+antes de comparar filtros o ejecutar un barrido con la misma selección.
+
+La llamada directa a Python no instala dependencias. En Windows,
+`Run_TPI.bat` prepara y verifica el entorno antes de llamar a este flujo.
+Las salidas de segmentación se describen en la sección 14.
+
+### Flujo opcional: exploración volumétrica
+
+El flujo siguiente carga volúmenes completos y cuenta componentes 3D.
+Reservarlo para una máquina con memoria suficiente:
 
 ```bash
 python scripts/explore_dataset.py
@@ -295,7 +352,7 @@ preprocesamiento.
 
 ## 8. API de segmentación
 
-```python
+```text
 segment_slice(image, liver_mask, settings) -> np.ndarray
 ```
 
@@ -355,7 +412,7 @@ con Otsu y el método estadístico; el global sigue comparando con su umbral.
 
 ## 9. API de métricas
 
-```python
+```text
 dice_score(pred, reference) -> float
 iou_score(pred, reference) -> float
 ```
@@ -441,7 +498,8 @@ configurados de mediana, gaussiano y bilateral. Guarda cuatro paneles con la
 misma escala `[0, 1]` y orientación en
 `figures/filter_comparison_case_<id>_slice_<index>.png`, bajo el directorio de
 salida configurado (identificadores con ceros a la izquierda). No abre una
-ventana gráfica. Si falta el CSV o está vacío, informa un error.
+ventana gráfica. Compara los tres filtros aunque `denoising.method` elija
+uno distinto para la segmentación. Si falta el CSV o está vacío, informa un error.
 
 Registrar la ventana y los parámetros elegidos; comparar reducción de ruido y
 visibilidad de los bordes hepáticos y tumorales. La comparación visual no es
@@ -464,7 +522,7 @@ python -m pip check
 | `test_data_io.py` | Pares NIfTI sintéticos, orientación, espaciado y caso faltante |
 | `test_dataset.py` | Muestreo, volumen físico, componentes y selección reproducible |
 | `test_preprocessing.py` | Ventana, coordenadas de recorte, forma y dtype de filtros |
-| `test_compare_filters.py` | Comparación sin GUI, parámetros, orientación, lectura de un corte y errores de selección |
+| `test_compare_filters.py` | Parámetros de filtros, orientación, lectura de un corte y errores de selección |
 | `test_metrics.py` | Casos idénticos, disjuntos, vacíos, solapamiento y validación |
 | `test_segmentation.py` | Umbrales, región hepática, morfología, conectividad y contrato |
 | `test_run_segmentation.py` | Ejecución, exportación, agregación, barrido, fallos y reproducibilidad |
@@ -472,9 +530,10 @@ python -m pip check
 | `test_slice_io.py` | Lectura por planos, orientación, rango de etiquetas y selección 2D |
 | `test_features.py` | Geometría 2D, espaciado físico y GLCM enmascarada |
 
-La suite incluye tests sintéticos del ejecutor y no requiere los datos reales. Estos tests no
-sustituyen una evaluación de calidad de segmentación ni una prueba completa
-de los tres scripts sobre todos los volúmenes.
+La suite incluye tests sintéticos del lanzador y del ejecutor sin requerir
+datos reales. No sustituye una evaluación de calidad de segmentación ni una
+prueba de todos los scripts sobre los volúmenes reales. El test del lanzador
+ejecuta el flujo Python; no prueba CMD ni el archivo BAT nativo de Windows.
 
 ## 12. Errores habituales y límites de la revisión
 
@@ -486,7 +545,11 @@ de los tres scripts sobre todos los volúmenes.
 | Falta `dataset_inventory.csv` | Ejecutar primero `explore_dataset.py` |
 | Falta `selected_cases_slices.csv` | Ejecutar la selección antes del preprocesamiento |
 | No se pueden formar los terciles | Revisar pool y empates en volúmenes tumorales |
-| No hay casos multilesión | La selección actual exige al menos uno |
+| No hay casos multilesión | La selección volumétrica exige al menos uno; la selección 2D no |
+| Fallo de instalación o `pip check` en el BAT | Revisar el entorno y el mensaje antes de procesar datos |
+| El lanzador no encuentra pares en ninguna ruta | Restaurar el dataset o corregir `data_dir` |
+| ID temporal ya existente | Esperar un segundo y volver a ejecutar el lanzador |
+| La comparación de filtros falla tras un fallback | Ajustar `data_dir`; el fallback no modifica el YAML |
 | No se puede recortar una máscara vacía | Revisar el corte elegido o tratarlo antes del recorte |
 | Valores HU enviados a segmentación | Usar la imagen normalizada `denoised` |
 | Formas distintas en segmentación o métricas | Conservar las coordenadas completas o reconstruir el recorte; no redimensionar para ocultar el desajuste |
@@ -504,8 +567,9 @@ Detalles a considerar en trabajos futuros:
   rango antes de convertir a `uint8`.
 - El README describe el tamaño del conjunto original de LiTS. El script de
   exploración informa la cantidad de casos pareados disponibles en la ruta local.
-- El ejecutor prueba la precedencia de configuración local. No hay cobertura de
-  todas las validaciones de NIfTI; las garantías de tests son las indicadas arriba.
+- El lanzador y la comparación de filtros prueban la precedencia de configuración
+  local. No hay cobertura de todas las validaciones de NIfTI; las garantías de
+  tests son las indicadas arriba.
 
 ## 13. Interpretación experimental y próximos pasos
 
@@ -536,7 +600,7 @@ python scripts/run_segmentation.py --config config.yaml --run-id alternativa
 
 `--run-id` es obligatorio y admite letras ASCII, números, guiones y guiones bajos.
 La carpeta `<output_dir>/segmentation/<run-id>/` debe ser nueva, incluso si una
-corrida anterior falló. No se regenera la selección automáticamente. Para otro
+corrida anterior falló. Este ejecutor manual no regenera la selección automáticamente; `run_tpi.py` sí. Para otro
 archivo de configuración, los CSV de entrada deben estar en su directorio de
 salida efectivo.
 
@@ -618,13 +682,43 @@ Por la restricción de recursos se verifican las pruebas del lector y del flujo
 2D, sin volver a ejecutar el inventario volumétrico sobre datos reales:
 
 ```bash
-python -m unittest tests.test_slice_io tests.test_run_segmentation tests.test_segmentation tests.test_metrics tests.test_preprocessing
+python -m unittest tests.test_slice_io tests.test_run_tpi tests.test_compare_filters
+python -m unittest tests.test_run_segmentation tests.test_segmentation tests.test_metrics tests.test_preprocessing
 ```
 
 Los NIfTI de prueba son fixtures sintéticos pequeños; no se realiza segmentación
 ni análisis de componentes 3D de los volúmenes reales.
 
-## 15. API de características geométricas y textura 2D
+
+## 15. Visualización de contornos
+
+`psib.visualization` ofrece helpers opcionales para comparar máscaras alineadas:
+
+- `plot_overlay(image, prediction, reference, *, ax=None, title=None)` devuelve
+  `(figure, axes)`; puede dibujar sobre ejes existentes.
+- `save_overlay(image, prediction, reference, output_path, *, title=None, dpi=150)`
+  crea las carpetas de destino, guarda la figura, la cierra y devuelve un `Path`.
+
+La imagen debe ser 2D, real y finita; ambas máscaras deben tener la misma forma
+y valores binarios 0/1. Los arrays siguen la convención `(X, Y)` y se transponen
+solo al dibujar. La predicción aparece en cian y la referencia en rojo anaranjado.
+`dpi` debe ser un entero positivo. Las entradas inválidas generan `ValueError`.
+
+Estos helpers no se llaman automáticamente desde `run_segmentation.py`;
+las figuras del ejecutor mantienen sus tres paneles separados. Para guardar
+una superposición del ejemplo de la sección 10:
+
+```python
+from psib.visualization import save_overlay
+
+save_overlay(
+    processed["denoised"], prediction, reference,
+    Path(cfg["_output_dir"]) / "figures" / "contours.png",
+    title=f"Caso {int(row.case_id)} — corte {k}",
+)
+```
+
+## 16. API de características geométricas y textura 2D
 
 El módulo `psib.features` extrae propiedades de máscaras en un corte axial. No
 calcula volumen 3D ni asocia automáticamente una lesión entre cortes.
@@ -673,7 +767,7 @@ descriptivo y no realiza pruebas de hipótesis.
 
 ### Tablas por selección
 
-Desde la raíz del repositorio y después de generar `results/selected_cases_slices.csv`:
+Desde la raíz del repositorio y después de generar `<output_dir>/selected_cases_slices.csv`:
 
 ```bash
 python scripts/extract_features.py
@@ -681,7 +775,7 @@ python scripts/extract_features.py
 
 El script lee cada corte seleccionado con `iter_case_slices`, prepara la imagen
 normalizada mediante `prepare_denoised_slice` y escribe estos archivos en
-`results/features/`:
+`<output_dir>/features/`:
 
 | Archivo | Contenido |
 | --- | --- |
@@ -694,3 +788,6 @@ normalizada mediante `prepare_denoised_slice` y escribe estos archivos en
 propiedades sin pares válidos son NaN. En la tabla de resumen, `n_slices` ignora
 esos valores NaN para cada propiedad. Las máscaras de referencia definen ambas
 regiones, por lo que la comparación de tejidos es descriptiva.
+
+El comando acepta `--config ruta/a/config.yaml`. Usa el `data_dir` configurado
+sin aplicar el fallback del lanzador; corregir esa ruta si fue necesario el fallback.
