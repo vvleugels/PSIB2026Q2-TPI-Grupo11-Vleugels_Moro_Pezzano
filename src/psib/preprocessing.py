@@ -52,6 +52,16 @@ def denoise(image: np.ndarray, settings: Mapping[str, Any]) -> np.ndarray:
     raise ValueError(f"Unknown denoising method {method!r}; use median, gaussian, or bilateral")
 
 
+def prepare_denoised_slice(slice_hu: np.ndarray, cfg: Mapping[str, Any]) -> np.ndarray:
+    """Window and denoise one full-size HU slice for analysis or segmentation."""
+    settings = cfg.get("preprocessing", cfg)
+    window = settings.get("hu_window", {})
+    windowed = apply_hu_window(
+        slice_hu, float(window.get("center", 60)), float(window.get("width", 400))
+    )
+    return denoise(windowed, settings.get("denoising", {}))
+
+
 def enhance(image: np.ndarray, settings: Mapping[str, Any]) -> np.ndarray:
     """Apply optional histogram equalization or CLAHE; 'none' returns a copy."""
     source = np.asarray(image, dtype=np.float32)

@@ -26,7 +26,7 @@ from scipy import ndimage
 from psib.config import load_config
 from psib.data_io import iter_case_slices
 from psib.metrics import dice_score, iou_score
-from psib.preprocessing import apply_hu_window, denoise
+from psib.preprocessing import prepare_denoised_slice
 from psib.segmentation import _validate_settings, segment_slice
 
 
@@ -35,10 +35,7 @@ COUNT_COLUMNS = ["pred_area", "reference_area", "intersection", "union"]
 
 def prepare_image(hu, cfg):
     """Compute exactly the full-size denoised stage, without enhancement/crop."""
-    prep = cfg.get("preprocessing", {})
-    window = prep.get("hu_window", {})
-    return denoise(apply_hu_window(hu, window.get("center", 60), window.get("width", 400)),
-                   prep.get("denoising", {}))
+    return prepare_denoised_slice(hu, cfg)
 
 
 def build_configurations(cfg, sweep=False):

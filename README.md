@@ -113,6 +113,17 @@ These measurements describe individual 2D slices. They do not yet calculate a
 reference masks also guide slice and region selection, so feature comparisons
 are descriptive and not an independent evaluation.
 
+To build comparison tables for the selected slices, run:
+
+```bash
+python scripts/extract_features.py
+```
+
+The command reads `results/selected_cases_slices.csv` and writes
+`texture_per_region.csv`, `texture_summary.csv`, and `tumor_geometry.csv` under
+`results/features/`. The summary reports per-slice means and population standard
+deviations; it does not perform statistical hypothesis tests.
+
 ## Python files and ownership
 
 | File | Description | Owner |
@@ -124,12 +135,14 @@ are descriptive and not an independent evaluation.
 | `src/psib/preprocessing.py` | HU window, denoising, enhancement, liver crop | Person A |
 | `src/psib/visualization.py` | Superposición de contornos de predicción y referencia | Person C |
 | `src/psib/features.py` | Geometría 2D por lesión y textura GLCM en una ROI | Person C |
+| `scripts/extract_features.py` | Tablas de textura por región y geometría tumoral | Person C |
 | `scripts/explore_dataset.py` | Inventory CSV and context figures | Person A |
 | `scripts/select_cases.py` | Selected case/slice CSV | Person A |
 | `scripts/preprocess_selected.py` | Selected-slice preprocessing figures | Person A |
 | `tests/test_data_io.py` | Synthetic NIfTI pairing, orientation, spacing, loading checks | Person A |
 | `tests/test_dataset.py` | Candidate sampling, tumor volume, lesions, slice-gap checks | Person A |
 | `tests/test_preprocessing.py` | Windowing, crop coordinates, filter shape/dtype checks | Person A |
+| `tests/test_features.py` | Geometry, spacing, masked GLCM properties and validation | Person C |
 | `tests/__init__.py` | Test discovery and source-package path setup | Person A |
 
 ## Shared interfaces
@@ -138,6 +151,8 @@ are descriptive and not an independent evaluation.
 - `psib.dataset.select_slices(seg, n_slices, minimum_gap=5)` returns slice indices.
 - `psib.preprocessing.preprocess_slice(slice_hu, liver_mask, cfg)` returns
   `windowed`, `denoised`, `enhanced`, `cropped`, and `crop_box` values.
+- `psib.preprocessing.prepare_denoised_slice(slice_hu, cfg)` returns the
+  full-size, normalized image shared by segmentation and feature extraction.
 
 Persons B and C can rely on these signatures. The feature API is:
 

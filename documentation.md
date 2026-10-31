@@ -17,6 +17,7 @@ segmentación y sus tests presentes en el directorio de trabajo.
 | Segmentación 2D y posprocesamiento | Implementado como API Python |
 | Dice e IoU | Implementados como API Python |
 | Características geométricas y textura GLCM 2D | Implementadas como API Python |
+| Tablas de características para cortes seleccionados | Implementadas como script |
 | Cuantificación de lesiones 3D | Pendiente |
 | Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Implementado |
 | Barrido de 252 configuraciones y comparación exploratoria | Implementado |
@@ -38,6 +39,7 @@ consultar este documento junto con el código y los tests.
 | `src/psib/metrics.py` | Dice e IoU entre máscaras binarias |
 | `src/psib/visualization.py` | Superposición de contornos de predicción y referencia |
 | `src/psib/features.py` | Características geométricas por lesión y textura GLCM 2D |
+| `scripts/extract_features.py` | Tablas de características para cortes seleccionados |
 | `scripts/` | Exploración, selección, figuras y experimentos de segmentación |
 | `notebooks/` | Ejemplos interactivos de exploración y preprocesamiento |
 | `tests/` | Tests sintéticos con `unittest` |
@@ -276,6 +278,11 @@ por separado. Para reconstruir coordenadas desde un recorte, sumar su origen
 `(x0, y0)`. Para la segmentación base se usa `denoised`, que conserva la
 forma original y evita necesitar esa reconstrucción.
 
+`prepare_denoised_slice(slice_hu, cfg)` aplica solo ventana HU y denoising a un
+corte completo y devuelve la imagen normalizada. El ejecutor de segmentación y
+`extract_features.py` comparten esta función para analizar la misma etapa de
+preprocesamiento.
+
 ## 8. API de segmentación
 
 ```python
@@ -429,6 +436,7 @@ python -m pip check
 | `test_segmentation.py` | Umbrales, región hepática, morfología, conectividad y contrato |
 | `test_run_segmentation.py` | Ejecución, exportación, agregación, barrido, fallos y reproducibilidad |
 | `test_slice_io.py` | Lectura por planos, orientación, rango de etiquetas y selección 2D |
+| `test_features.py` | Geometría 2D, espaciado físico y GLCM enmascarada |
 
 La suite incluye tests sintéticos del ejecutor y no requiere los datos reales. Estos tests no
 sustituyen una evaluación de calidad de segmentación ni una prueba completa
@@ -626,5 +634,29 @@ con la imagen filtrada normalizada.
 Estas características resumen una región en un corte; sus comparaciones son
 descriptivas cuando la región se define con máscaras de referencia. La API
 permite analizar tanto una referencia como una predicción, pero esta entrega no
-incluye todavía una tabla agregada de todos los casos ni una comparación
-estadística automatizada.
+debe interpretarse como evaluación independiente. El resumen generado es
+descriptivo y no realiza pruebas de hipótesis.
+
+### Tablas por selección
+
+Desde la raíz del repositorio y después de generar `results/selected_cases_slices.csv`:
+
+```bash
+python scripts/extract_features.py
+```
+
+El script lee cada corte seleccionado con `iter_case_slices`, prepara la imagen
+normalizada mediante `prepare_denoised_slice` y escribe estos archivos en
+`results/features/`:
+
+| Archivo | Contenido |
+| --- | --- |
+| `texture_per_region.csv` | Una fila por corte y ROI (`tumor_reference` o `healthy_liver_reference`), con área, conteo de píxeles y propiedades GLCM |
+| `texture_summary.csv` | Media y desvío estándar poblacional por región y propiedad, con cantidad de cortes válidos |
+| `tumor_geometry.csv` | Una fila por componente tumoral 8-conectado, con características geométricas y ubicación de caso/corte |
+
+`pair_count` cuenta los pares espaciales válidos antes de simetrizar cada GLCM;
+`n_offsets` cuenta las combinaciones distancia/ángulo que aportaron pares. Las
+propiedades sin pares válidos son NaN. En la tabla de resumen, `n_slices` ignora
+esos valores NaN para cada propiedad. Las máscaras de referencia definen ambas
+regiones, por lo que la comparación de tejidos es descriptiva.

@@ -1,0 +1,124 @@
+"""Extract 2D geometry and masked GLCM features from selected axial slices."""
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+import numpy as np
+import pandas as pd
+
+from psib.config import load_config
+from psib.data_io import iter_case_slices
+from psib.features import (
+    GEOMETRY_COLUMNS,
+    TEXTURE_COLUMNS,
+    extract_geometric_features,
+    extract_texture_features,
+)
+from psib.preprocessing import prepare_denoised_slice
+
+
+TEXTURE_PROPERTIES = TEXTURE_COLUMNS[:4]
+REGIONS = (("tumor_reference", 2), ("healthy_liver_reference", 1))
+
+
+def read_selection(path: Path) -> pd.DataFrame:
+    """Read and validate the case/slice pairs used by the 2D workflows."""
+    if not path.is_file():
+        raise FileNotFoundError(f"No existe la selección {path}; ejecute scripts/select_slices_2d.py primero.")
+    frame = pd.read_csv(path)
+    if frame.empty or not {"case_id", "slice_index"}.issubset(frame.columns):
+        raise ValueError("La selección debe tener filas y columnas case_id y slice_index.")
+    for column in ("case_id", "slice_index"):
+        values = pd.to_numeric(frame[column], errors="coerce")
+        numeric = values.to_numpy(dtype=float)
+        if not np.isfinite(numeric).all() or (numeric < 0).any() or (numeric % 1 != 0).any():
+            raise ValueError(f"{column} debe contener enteros no negativos.")
+        frame[column] = values.astype(np.int64)
+    if frame.duplicated(["case_id", "slice_index"]).any():
+        raise ValueError("La selección contiene pares case_id/slice_index duplicados.")
+    return frame
+
+
+def summarize_texture(frame: pd.DataFrame) -> pd.DataFrame:
+    """Summarize each GLCM property by reference-defined tissue region."""
+    rows = []
+    for region in (name for name, _ in REGIONS):
+        selected = frame[frame.region == region]
+        for property_name in TEXTURE_PROPERTIES:
+            values = selected[property_name].dropna().to_numpy(dtype=float)
+            rows.append({
+                "region": region,
+                "feature": property_name,
+                "n_slices": int(values.size),
+                "mean": float(values.mean()) if values.size else float("nan"),
+                "std": float(values.std(ddof=0)) if values.size else float("nan"),
+            })
+    return pd.DataFrame(rows, columns=("region", "feature", "n_slices", "mean", "std"))
+
+
+def extract_features(config_path: str | Path | None = None) -> Path:
+    """Write per-region texture, per-tumor geometry, and summary CSV tables."""
+    cfg = load_config(config_path)
+    output_dir = Path(cfg["_output_dir"]) / "features"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    selection = read_selection(Path(cfg["_output_dir"]) / "selected_cases_slices.csv")
+
+    texture_rows: list[dict[str, object]] = []
+    geometry_rows: list[dict[str, object]] = []
+    for case_id, rows in selection.groupby("case_id", sort=True):
+        indices = sorted(int(value) for value in rows.slice_index)
+        for slice_index, ct, seg, spacing in iter_case_slices(
+            int(case_id), indices, cfg["data_dir"]
+        ):
+            image = prepare_denoised_slice(ct, cfg)
+            tumor_mask = seg == 2
+            for region_name, label_value in REGIONS:
+                roi = seg == label_value
+                texture = extract_texture_features(image, roi)
+                texture_rows.append({
+                    "case_id": int(case_id),
+                    "slice_index": int(slice_index),
+                    "region": region_name,
+                    "pixel_count": int(np.count_nonzero(roi)),
+                    "area_mm2": float(np.count_nonzero(roi) * spacing[0] * spacing[1]),
+                    **texture,
+                })
+
+            component_table = extract_geometric_features(tumor_mask, spacing[:2])
+            for component in component_table.to_dict("records"):
+                geometry_rows.append({
+                    "case_id": int(case_id),
+                    "slice_index": int(slice_index),
+                    **component,
+                })
+
+    texture_columns = (
+        "case_id", "slice_index", "region", "pixel_count", "area_mm2",
+        *TEXTURE_PROPERTIES, "pair_count", "n_offsets",
+    )
+    texture_frame = pd.DataFrame(texture_rows, columns=texture_columns)
+    geometry_columns = ("case_id", "slice_index", *GEOMETRY_COLUMNS)
+    geometry_frame = pd.DataFrame(geometry_rows, columns=geometry_columns)
+    summary = summarize_texture(texture_frame)
+
+    texture_frame.to_csv(output_dir / "texture_per_region.csv", index=False)
+    geometry_frame.to_csv(output_dir / "tumor_geometry.csv", index=False)
+    summary.to_csv(output_dir / "texture_summary.csv", index=False)
+    print(f"Saved feature tables for {len(selection)} selected slices under {output_dir}", flush=True)
+    return output_dir
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=ROOT / "config.yaml")
+    args = parser.parse_args()
+    extract_features(args.config)
+
+
+if __name__ == "__main__":
+    main()
