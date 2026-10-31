@@ -22,10 +22,11 @@ def main() -> None:
     selection = cfg.get("selection", {})
     pool_size = int(selection.get("candidate_pool_size", 15))
     seed = int(selection.get("seed", 2026))
+    available_cases = list_cases(cfg["data_dir"])
     inventory = build_inventory(cfg["data_dir"], pool_size, seed)
     inventory.to_csv(out / "dataset_inventory.csv", index=False)
     inventory[["candidate_pool_rank", "case_id", "candidate_pool_seed"]].assign(
-        pool_criteria=f"seeded random subsample from {len(list_cases(cfg['data_dir']))} labeled pairs; excludes unlabeled test images"
+        pool_criteria=f"seeded random subsample from {len(available_cases)} labeled pairs; excludes unlabeled test images"
     ).to_csv(out / "candidate_pool.csv", index=False)
     figures = out / "figures"
     # Estimate the HU distribution from the candidate pool, sampling each case
@@ -45,11 +46,13 @@ def main() -> None:
     for filename, values, xlabel, ylabel in plots:
         fig, ax = plt.subplots(figsize=(7, 4.5))
         ax.hist(values, bins=40 if filename == "hu_histogram.png" else 20, color="#367a9a", edgecolor="white")
-        ax.set(xlabel=xlabel, ylabel=ylabel, title=f"Candidate pool (n={len(inventory)} of 131 labeled cases)")
+        ax.set(xlabel=xlabel, ylabel=ylabel,
+               title=f"Candidate pool (n={len(inventory)} of {len(available_cases)} labeled cases)")
         fig.tight_layout()
         fig.savefig(figures / filename, dpi=160)
         plt.close(fig)
-    print(f"Saved candidate pool ({len(inventory)} of 131 labeled cases), inventory, and context figures under {out}")
+    print(f"Saved candidate pool ({len(inventory)} of {len(available_cases)} labeled cases), "
+          f"inventory, and context figures under {out}")
 
 
 if __name__ == "__main__":
