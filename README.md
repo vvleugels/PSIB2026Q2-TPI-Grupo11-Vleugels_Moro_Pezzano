@@ -97,6 +97,15 @@ activity tab shows the latest run summary on startup and live output while a
 new run is processing. The launcher uses the existing `.venv` and checks
 dependencies before opening the interface.
 
+The **Morfología 3D** tab analyzes the selected cases' reference tumor masks
+separately from 2D segmentation. Run the 2D workflow first to create
+`results/selected_cases_slices.csv`, then click **Analizar morfología 3D**.
+The GUI shows tumor volume, 6-connected component count, largest-component
+volume and its axis-aligned dimensions, with a 3D surface figure per case.
+Detailed component measurements and figures are saved in
+`results/morphology_3d/`. This is descriptive morphology of reference labels;
+it does not generate a 3D segmentation prediction.
+
 ## Data and configuration
 
 The default data directory is `data/Selected_database/`, intended for the
@@ -132,10 +141,11 @@ Segmentation variants are compared with Dice and IoU against reference masks;
 2D geometric and GLCM features describe the selected regions.
 
 The **maximum objective** adds descriptive 3D morphology from the reference
-masks: physical tumor volume and the number of connected tumor components per
-case. This is available through the optional volumetric inventory. It does not
-extend the prediction pipeline to 3D. The detailed segmentation, features, and
-figures remain 2D to keep computation bounded.
+masks of the selected cases: physical tumor volume, number of 6-connected
+components, per-component volume and axis-aligned dimensions, plus a 3D surface
+view. This is available from the GUI's **Morfología 3D** tab or by running
+`python scripts/analyze_morphology_3d.py`. It does not extend the prediction
+pipeline to 3D. The detailed segmentation, features, and evaluation remain 2D.
 
 The selected slices are chosen using reference masks, and the same cases are
 used for the exploratory comparison. Dice/IoU and feature summaries therefore

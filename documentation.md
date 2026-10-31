@@ -22,6 +22,7 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 | Resumen de textura por caso | Implementado como tabla y gráfico descriptivo |
 | Diferencias de textura emparejadas por caso | Implementadas como tablas descriptivas |
 | Volumen tumoral y conteo de componentes 3D desde máscaras de referencia | Implementados en la exploración volumétrica opcional |
+| Análisis morfológico 3D de los casos seleccionados, exportación de medidas por lesión y superficies | Implementado como flujo opcional invocable desde el GUI |
 | Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Implementado |
 | Barrido de 252 configuraciones y comparación exploratoria | Implementado |
 | Comparación de filtros sobre un corte y exportación sin GUI | Implementado |
@@ -31,9 +32,10 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 | Evaluación independiente con otra base | Pendiente |
 
 El flujo principal usa lectura por cortes 2D para limitar el consumo de memoria.
-El inventario volumétrico opcional calcula el volumen tumoral físico y el
-número de componentes conectados a partir de las máscaras de referencia. No
-genera una predicción tumoral 3D ni una reconstrucción de superficies.
+El inventario exploratorio calcula volumen tumoral y componentes desde las
+máscaras de referencia. El flujo morfológico opcional descrito a continuación
+agrega medidas por componente y figuras de superficie, sin generar una
+predicción tumoral 3D.
 
 ### Alcance mínimo y máximo
 
@@ -47,11 +49,17 @@ y estadísticos, además de variantes morfológicas, usando Dice e IoU frente a
 las máscaras de referencia.
 
 El **objetivo máximo** agrega un análisis morfológico descriptivo en 3D de las
-máscaras de referencia: volumen tumoral en cm³ y número de componentes
-conectados por caso. Se ejecuta como inventario volumétrico opcional; no incluye
-segmentación predictiva 3D ni visualización de superficies. Así, el
-procesamiento exhaustivo y la comparación de métodos se mantienen en 2D sobre
-los cortes seleccionados.
+máscaras de referencia de los casos seleccionados: volumen tumoral en cm³,
+número de componentes tumorales 6-conexos, volumen y dimensiones del
+paralelepípedo alineado con los ejes de cada componente, y una visualización de
+superficie 3D por caso. Se inicia desde la pestaña **Morfología 3D** del GUI o
+con `python scripts/analyze_morphology_3d.py`, después de generar
+`results/selected_cases_slices.csv`. Los CSV y las figuras se guardan en
+`results/morphology_3d/`. Usa el espaciado físico del NIfTI y el orden canónico
+RAS `(X,Y,Z)`; el conteo 6-conexo considera vecindad por caras. Las medidas
+describen las etiquetas de referencia y no son métricas de una predicción
+automática 3D. El procesamiento exhaustivo y la comparación de métodos se
+mantienen en 2D sobre los cortes seleccionados.
 
 ## 2. Estructura y responsabilidades
 
@@ -72,11 +80,13 @@ los cortes seleccionados.
 | `scripts/run_segmentation.py` | Ejecuciones base y barrido de parámetros |
 | `scripts/compare_filters.py` | Comparación de mediana, gaussiano y bilateral |
 | `scripts/explore_dataset.py` | Inventario volumétrico y figuras de contexto |
+| `src/psib/morphology3d.py` | Medidas físicas de componentes tumorales 3D |
+| `scripts/analyze_morphology_3d.py` | CSV y superficies 3D de los casos seleccionados |
 | `scripts/select_cases.py` | Selección por terciles de volumen tumoral |
 | `scripts/preprocess_selected.py` | Figuras de ventana, filtrado y recorte |
 | `Run_TPI.bat` | Preparación del entorno Windows y llamada al lanzador Python |
 | `Run_TPI_GUI.bat` | Preparación del entorno Windows y apertura del GUI |
-| `scripts/gui.py` | Interfaz de escritorio para ejecutar el flujo 2D y abrir resultados |
+| `scripts/gui.py` | Interfaz de escritorio para el flujo 2D y el análisis morfológico 3D opcional |
 | `tests/` | Tests sintéticos con `unittest` |
 | `data/` | Datos locales, ignorados por Git |
 | `results/` | Tablas y figuras generadas, ignoradas por Git |

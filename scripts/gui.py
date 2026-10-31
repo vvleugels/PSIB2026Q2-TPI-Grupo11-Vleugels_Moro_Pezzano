@@ -6,6 +6,7 @@ import os
 import queue
 import re
 import json
+import csv
 import subprocess
 import sys
 import threading
@@ -53,7 +54,7 @@ class TpiLauncher:
         hero_top = ttk.Frame(hero, style="Hero.TFrame")
         hero_top.pack(fill="x")
         ttk.Label(hero_top, text="PSIB  /  PROYECTO INTEGRADOR", style="Eyebrow.Hero.TLabel").pack(side="left")
-        ttk.Label(hero_top, text="FLUJO 2D", style="Badge.Hero.TLabel", padding=(11, 5)).pack(side="right")
+        ttk.Label(hero_top, text="2D + MORFOLOGÍA 3D", style="Badge.Hero.TLabel", padding=(11, 5)).pack(side="right")
         ttk.Label(hero, text="Segmentación hepática", style="Title.Hero.TLabel").pack(anchor="w", pady=(8, 2))
         ttk.Label(
             hero,
@@ -74,6 +75,9 @@ class TpiLauncher:
         controls.pack(fill="x", pady=(10, 10))
         self.run_button = ttk.Button(controls, text="▶   Ejecutar flujo 2D", style="Primary.TButton", command=self.run)
         self.run_button.pack(side="left")
+        self.morphology_button = ttk.Button(controls, text="◇   Analizar morfología 3D", style="Secondary.TButton",
+                                            command=self.run_morphology)
+        self.morphology_button.pack(side="left", padx=(9, 0))
         self.open_button = ttk.Button(controls, text="Abrir carpeta de resultados", style="Secondary.TButton", command=self.open_results, state="disabled")
         self.open_button.pack(side="left", padx=(9, 0))
         self.status = tk.StringVar(value="Listo para ejecutar")
@@ -88,10 +92,13 @@ class TpiLauncher:
         self.tabs = ttk.Notebook(frame, style="App.TNotebook")
         self.tabs.pack(fill="both", expand=True)
         self.viewer_tab = ttk.Frame(self.tabs, style="App.TFrame", padding=(0, 0, 0, 2))
+        self.morphology_tab = ttk.Frame(self.tabs, style="App.TFrame", padding=(0, 0, 0, 2))
         self.log_tab = ttk.Frame(self.tabs, style="App.TFrame", padding=(0, 0, 0, 2))
         self.tabs.add(self.viewer_tab, text="Figuras")
+        self.tabs.add(self.morphology_tab, text="Morfología 3D")
         self.tabs.add(self.log_tab, text="Registro")
         self.build_figure_viewer()
+        self.build_morphology_viewer()
 
         log_card = ttk.Frame(self.log_tab, style="Card.TFrame", padding=(16, 13))
         log_card.pack(fill="both", expand=True)
@@ -126,6 +133,7 @@ class TpiLauncher:
         self.log.tag_configure("error", foreground="#FF8D95")
         self.log.tag_configure("accent", foreground="#83B8FF")
         self.load_latest_results()
+        self.load_morphology_results()
 
     def configure_styles(self) -> None:
         style = ttk.Style(self.root)
@@ -200,6 +208,129 @@ class TpiLauncher:
         self.figure_canvas.bind("<B1-Motion>", lambda event: self.figure_canvas.scan_dragto(event.x, event.y, gain=1))
         self.figure_canvas.bind("<MouseWheel>", self.on_figure_wheel)
         self.show_figure_message("Todavía no hay figuras cargadas")
+
+    def build_morphology_viewer(self) -> None:
+        card = ttk.Frame(self.morphology_tab, style="Card.TFrame", padding=(14, 10))
+        card.pack(fill="both", expand=True)
+        header = ttk.Frame(card, style="Card.TFrame")
+        header.pack(fill="x")
+        ttk.Label(header, text="Máscaras tumorales de referencia · componentes 6-conexos", style="SectionTitle.TLabel").pack(side="left")
+        self.morphology_counter = tk.StringVar(value="Sin análisis 3D")
+        ttk.Label(header, textvariable=self.morphology_counter, style="Body.TLabel").pack(side="right")
+        self.open_morphology_button = ttk.Button(header, text="Abrir CSV y figuras", style="Secondary.TButton",
+                                                 command=self.open_morphology_results, state="disabled")
+        self.open_morphology_button.pack(side="right", padx=(0, 10))
+        ttk.Label(card, text="Volumen físico y dimensiones por lesión; el procesamiento 3D no modifica la segmentación 2D.",
+                  style="Body.TLabel").pack(anchor="w", pady=(3, 8))
+
+        table_frame = ttk.Frame(card, style="Card.TFrame")
+        table_frame.pack(fill="x", pady=(0, 8))
+        columns = ("case_id", "lesions", "volume", "largest", "x", "y", "z")
+        self.morphology_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=4)
+        headings = (("case_id", "Caso", 80), ("lesions", "Lesiones", 90),
+                    ("volume", "Volumen total (cm³)", 145), ("largest", "Mayor lesión (cm³)", 145),
+                    ("x", "X mayor (mm)", 100), ("y", "Y mayor (mm)", 100), ("z", "Z mayor (mm)", 100))
+        for column, title, width in headings:
+            self.morphology_table.heading(column, text=title)
+            self.morphology_table.column(column, width=width, anchor="center", stretch=True)
+        table_scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.morphology_table.yview)
+        self.morphology_table.configure(yscrollcommand=table_scroll.set)
+        self.morphology_table.pack(side="left", fill="x", expand=True)
+        table_scroll.pack(side="right", fill="y")
+
+        toolbar = ttk.Frame(card, style="Card.TFrame")
+        toolbar.pack(fill="x", pady=(0, 7))
+        self.morphology_previous = ttk.Button(toolbar, text="◀  Anterior", style="Secondary.TButton",
+                                              command=lambda: self.show_morphology_figure(-1), state="disabled")
+        self.morphology_previous.pack(side="left")
+        self.morphology_next = ttk.Button(toolbar, text="Siguiente  ▶", style="Secondary.TButton",
+                                          command=lambda: self.show_morphology_figure(1), state="disabled")
+        self.morphology_next.pack(side="left", padx=(7, 0))
+        self.morphology_figure_label = tk.StringVar(value="Ejecutá el análisis para generar las visualizaciones 3D")
+        ttk.Label(toolbar, textvariable=self.morphology_figure_label, style="Body.TLabel").pack(side="left", padx=(12, 0))
+        self.morphology_canvas = tk.Canvas(card, background="#111C2E", highlightthickness=0)
+        self.morphology_canvas.pack(fill="both", expand=True)
+        self.morphology_canvas.bind("<Configure>", lambda _event: self.render_morphology_figure())
+        self.morphology_figures: list[Path] = []
+        self.morphology_image: Image.Image | None = None
+        self.morphology_photo: ImageTk.PhotoImage | None = None
+        self.morphology_index = -1
+
+    def load_morphology_results(self) -> None:
+        try:
+            config = load_config(self.config_path.get())
+            output = Path(config["_output_dir"]) / "morphology_3d"
+            summary_path = output / "morphology_3d_per_case.csv"
+            if summary_path.is_file():
+                self.show_morphology_results(output)
+        except (OSError, ValueError, KeyError):
+            return
+
+    def show_morphology_results(self, output: Path) -> None:
+        self.morphology_output = output
+        self.open_morphology_button.configure(state="normal")
+        summary_path = output / "morphology_3d_per_case.csv"
+        for item in self.morphology_table.get_children():
+            self.morphology_table.delete(item)
+        case_ids = []
+        try:
+            with summary_path.open(newline="", encoding="utf-8") as stream:
+                for row in csv.DictReader(stream):
+                    case_id = int(row["case_id"])
+                    case_ids.append(case_id)
+                    self.morphology_table.insert("", "end", values=(
+                        f"{case_id:03d}", row["connected_components_6"],
+                        f"{float(row['tumor_volume_cm3']):.2f}", f"{float(row['largest_component_cm3']):.2f}",
+                        f"{float(row['largest_extent_x_mm']):.1f}", f"{float(row['largest_extent_y_mm']):.1f}",
+                        f"{float(row['largest_extent_z_mm']):.1f}"))
+        except (OSError, ValueError, KeyError) as exc:
+            self.morphology_counter.set(f"No se pudo leer el resumen: {exc}")
+            return
+        self.morphology_figures = [output / f"case_{case_id:03d}_surface_3d.png"
+                                   for case_id in case_ids
+                                   if (output / f"case_{case_id:03d}_surface_3d.png").is_file()]
+        self.morphology_index = -1
+        self.morphology_counter.set(f"{len(self.morphology_table.get_children())} casos · detalle por lesión en CSV")
+        enabled = "normal" if len(self.morphology_figures) > 1 else "disabled"
+        self.morphology_previous.configure(state=enabled)
+        self.morphology_next.configure(state=enabled)
+        if self.morphology_figures:
+            self.show_morphology_figure(1)
+        else:
+            self.morphology_figure_label.set("No hay superficies 3D exportadas")
+
+    def show_morphology_figure(self, step: int) -> None:
+        if not self.morphology_figures:
+            return
+        self.morphology_index = (self.morphology_index + step) % len(self.morphology_figures)
+        path = self.morphology_figures[self.morphology_index]
+        with Image.open(path) as source:
+            self.morphology_image = source.convert("RGB")
+        match = re.search(r"case_(\d+)", path.stem)
+        case_label = f"Caso {int(match.group(1)):03d}" if match else path.stem
+        self.morphology_figure_label.set(f"{case_label} · Figura {self.morphology_index + 1} de {len(self.morphology_figures)}")
+        self.render_morphology_figure()
+
+    def render_morphology_figure(self) -> None:
+        if not hasattr(self, "morphology_canvas"):
+            return
+        canvas = self.morphology_canvas
+        canvas.delete("all")
+        width, height = max(canvas.winfo_width(), 1), max(canvas.winfo_height(), 1)
+        if self.morphology_image is None:
+            canvas.create_text(width / 2, height / 2, text="La visualización 3D aparecerá aquí",
+                               fill="#AAB7C8", font=("Segoe UI", 11))
+            return
+        image = self.morphology_image
+        scale = min((width - 20) / image.width, (height - 20) / image.height, 1.0)
+        size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
+        rendered = image if size == image.size else image.resize(size, Image.Resampling.LANCZOS)
+        self.morphology_photo = ImageTk.PhotoImage(rendered)
+        canvas.create_image(width / 2, height / 2, image=self.morphology_photo, anchor="center")
+
+    def open_morphology_results(self) -> None:
+        if getattr(self, "morphology_output", None) and self.morphology_output.is_dir():
+            os.startfile(self.morphology_output)
 
     def set_status(self, text: str, state: str) -> None:
         self.status.set(text)
@@ -399,6 +530,8 @@ class TpiLauncher:
         self.log.configure(state="disabled")
 
     def run(self) -> None:
+        if self.process is not None:
+            return
         config = Path(self.config_path.get()).expanduser()
         if not config.is_file():
             messagebox.showerror("Configuración no encontrada", f"No existe este archivo:\n{config}")
@@ -406,6 +539,7 @@ class TpiLauncher:
         self.results_dir = None
         self.open_button.configure(state="disabled")
         self.run_button.configure(state="disabled")
+        self.morphology_button.configure(state="disabled")
         self.log_meta.set("SALIDA EN VIVO")
         self.set_status("Ejecutando…", "running")
         self.show_figure_message("La corrida está generando sus figuras…")
@@ -416,6 +550,45 @@ class TpiLauncher:
         thread = threading.Thread(target=self.run_worker, args=(config.resolve(),), daemon=True)
         thread.start()
         self.root.after(100, self.poll_events)
+
+    def run_morphology(self) -> None:
+        if self.process is not None:
+            return
+        config = Path(self.config_path.get()).expanduser()
+        if not config.is_file():
+            messagebox.showerror("Configuración no encontrada", f"No existe este archivo:\n{config}")
+            return
+        self.run_button.configure(state="disabled")
+        self.morphology_button.configure(state="disabled")
+        self.log_meta.set("ANÁLISIS MORFOLÓGICO 3D")
+        self.set_status("Analizando máscaras 3D…", "running")
+        self.tabs.select(self.morphology_tab)
+        self.progress.pack(fill="x", pady=(0, 12), before=self.tabs)
+        self.progress.start(12)
+        self.append_log(f"\n> Iniciando morfología 3D con {config.resolve()}")
+        threading.Thread(target=self.morphology_worker, args=(config.resolve(),), daemon=True).start()
+        self.root.after(100, self.poll_events)
+
+    def morphology_worker(self, config: Path) -> None:
+        try:
+            interpreter = Path(sys.executable)
+            if interpreter.name.lower() == "pythonw.exe":
+                console_python = interpreter.with_name("python.exe")
+                if console_python.is_file():
+                    interpreter = console_python
+            environment = os.environ.copy()
+            environment["PYTHONIOENCODING"] = "utf-8"
+            self.process = subprocess.Popen(
+                [str(interpreter), str(ROOT / "scripts" / "analyze_morphology_3d.py"), "--config", str(config)],
+                cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                encoding="utf-8", errors="replace", bufsize=1, env=environment,
+            )
+            assert self.process.stdout is not None
+            for line in self.process.stdout:
+                self.events.put(("morph_line", line.rstrip()))
+            self.events.put(("morph_done", self.process.wait()))
+        except Exception as exc:
+            self.events.put(("morph_error", str(exc)))
 
     def run_worker(self, config: Path) -> None:
         try:
@@ -457,6 +630,32 @@ class TpiLauncher:
                 if line.startswith(RESULT_PREFIX):
                     result = line[len(RESULT_PREFIX):].removesuffix(".")
                     self.results_dir = Path(result)
+            elif kind == "morph_line":
+                self.append_log(str(value))
+            elif kind == "morph_error":
+                self.append_log(f"Error al iniciar el análisis 3D: {value}")
+                self.log_meta.set("ERROR EN MORFOLOGÍA 3D")
+                self.set_status("Error al iniciar", "error")
+                finished = True
+            elif kind == "morph_done":
+                code = int(value)
+                if code == 0:
+                    try:
+                        cfg = load_config(self.config_path.get())
+                        output = Path(cfg["_output_dir"]) / "morphology_3d"
+                        self.show_morphology_results(output)
+                        self.log_meta.set("ANÁLISIS 3D FINALIZADO")
+                        self.set_status("Morfología 3D lista", "success")
+                        self.tabs.select(self.morphology_tab)
+                    except Exception as exc:
+                        self.append_log(f"No se pudieron cargar los resultados 3D: {exc}")
+                        self.log_meta.set("ERROR AL CARGAR MORFOLOGÍA 3D")
+                        self.set_status("Error al cargar", "error")
+                else:
+                    self.log_meta.set("ANÁLISIS 3D CON ERROR")
+                    self.set_status(f"Análisis 3D con error ({code})", "error")
+                    self.tabs.select(self.log_tab)
+                finished = True
             elif kind == "error":
                 self.append_log(f"Error al iniciar el proceso: {value}")
                 self.log_meta.set("ERROR AL INICIAR")
@@ -484,6 +683,7 @@ class TpiLauncher:
             self.progress.pack_forget()
             self.process = None
             self.run_button.configure(state="normal")
+            self.morphology_button.configure(state="normal")
         else:
             self.root.after(100, self.poll_events)
 
