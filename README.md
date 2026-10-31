@@ -77,6 +77,13 @@ python scripts/run_tpi.py --config path/to/config.yaml
 Calling the Python workflow directly assumes dependencies are already installed;
 the automatic dependency checks are performed by `Run_TPI.bat`.
 
+### Windows graphical launcher
+
+Double-click `Run_TPI_GUI.bat` to open a small desktop interface. It lets you
+choose a YAML configuration, run the same 2D baseline workflow, follow its log,
+and open the result folder when it finishes. It uses the existing `.venv` and
+checks dependencies before opening the interface.
+
 ## Data and configuration
 
 The default data directory is `data/Selected_database/`, intended for the
@@ -241,6 +248,8 @@ denoised images, without enhancement or cropping.
 | `scripts/select_cases.py` | Volume-stratified case and slice selection |
 | `scripts/preprocess_selected.py` | Selected-slice preprocessing figures |
 | `Run_TPI.bat` | Windows environment setup/checks and Python workflow launch |
+| `Run_TPI_GUI.bat` | Windows environment setup/checks and graphical launcher |
+| `scripts/gui.py` | Desktop interface for the 2D baseline workflow |
 | `tests/` | Synthetic `unittest` coverage |
 
 Arrays use canonical RAS `(X, Y, Z)` order; axial slices are `array[:, :, k]`

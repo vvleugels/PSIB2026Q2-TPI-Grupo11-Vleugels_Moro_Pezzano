@@ -26,6 +26,7 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 | Barrido de 252 configuraciones y comparación exploratoria | Implementado |
 | Comparación de filtros sobre un corte y exportación sin GUI | Implementado |
 | Lanzador con fallback de datos e identificadores temporales | Implementado |
+| Interfaz gráfica para iniciar el flujo 2D y revisar su registro | Implementada como lanzador de escritorio |
 | Superposición de contornos de predicción y referencia | Disponible como API Python |
 | Evaluación independiente con otra base | Pendiente |
 
@@ -56,6 +57,8 @@ cuantificación 3D, compresión y reconstrucción siguen pendientes.
 | `scripts/select_cases.py` | Selección por terciles de volumen tumoral |
 | `scripts/preprocess_selected.py` | Figuras de ventana, filtrado y recorte |
 | `Run_TPI.bat` | Preparación del entorno Windows y llamada al lanzador Python |
+| `Run_TPI_GUI.bat` | Preparación del entorno Windows y apertura del GUI |
+| `scripts/gui.py` | Interfaz de escritorio para ejecutar el flujo 2D y abrir resultados |
 | `tests/` | Tests sintéticos con `unittest` |
 | `data/` | Datos locales, ignorados por Git |
 | `results/` | Tablas y figuras generadas, ignoradas por Git |
@@ -101,6 +104,12 @@ termina con un error. No modifica los archivos YAML del usuario.
 
 Instalar Python 3.12 de 64 bits con el lanzador `py` para crear el entorno.
 La ejecución nativa del archivo BAT no se ha verificado desde el entorno Linux.
+
+Para usar una interfaz gráfica, ejecutar `Run_TPI_GUI.bat`. Este lanzador
+prepara el mismo entorno virtual y abre `scripts/gui.py`, que permite elegir un
+YAML, iniciar el flujo 2D, seguir la salida del proceso y abrir la carpeta de
+resultados. El procesamiento corre en un hilo separado para que la ventana
+siga respondiendo.
 
 La selección 2D y la segmentación base comparten la configuración resuelta.
 El identificador usa la hora local con formato `YYYYMMDD-HHMMSS`; las salidas
