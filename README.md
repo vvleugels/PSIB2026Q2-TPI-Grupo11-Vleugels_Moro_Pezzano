@@ -80,7 +80,15 @@ the automatic dependency checks are performed by `Run_TPI.bat`.
 
 ### Windows graphical launcher
 
-Double-click `Run_TPI_GUI.bat` to open a small desktop interface. It lets you
+From File Explorer, double-click `Run_TPI_GUI.bat`. From PowerShell at the
+repository root, run:
+
+```powershell
+.\Run_TPI_GUI.bat
+```
+
+The launcher creates `.venv` if needed, installs/checks the dependencies, and
+opens the GUI. It lets you
 choose a YAML configuration, run the same 2D baseline workflow, follow its log,
 and review the generated prediction figures in the app. The figure viewer has
 previous/next navigation, fit-to-window, zoom, and pan controls. It opens the
