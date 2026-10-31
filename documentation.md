@@ -19,6 +19,7 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 | Características geométricas y textura GLCM 2D | Implementadas como API Python |
 | Tablas de características para cortes seleccionados | Implementadas como script |
 | Boxplots de textura entre regiones de referencia | Implementados como script |
+| Resumen de textura por caso | Implementado como tabla y gráfico descriptivo |
 | Cuantificación de lesiones 3D | Pendiente |
 | Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Implementado |
 | Barrido de 252 configuraciones y comparación exploratoria | Implementado |
@@ -784,6 +785,7 @@ normalizada mediante `prepare_denoised_slice` y escribe estos archivos en
 | --- | --- |
 | `texture_per_region.csv` | Una fila por corte y ROI (`tumor_reference` o `healthy_liver_reference`), con área, conteo de píxeles y propiedades GLCM |
 | `texture_summary.csv` | Media y desvío estándar poblacional por región y propiedad, con cantidad de cortes válidos |
+| `texture_per_case.csv` | Una fila por caso y región, con medias de los cortes seleccionados y número de cortes válidos |
 | `tumor_geometry.csv` | Una fila por componente tumoral 8-conectado, con características geométricas y ubicación de caso/corte |
 
 `pair_count` cuenta los pares espaciales válidos antes de simetrizar cada GLCM;
@@ -792,12 +794,19 @@ propiedades sin pares válidos son NaN. En la tabla de resumen, `n_slices` ignor
 esos valores NaN para cada propiedad. Las máscaras de referencia definen ambas
 regiones, por lo que la comparación de tejidos es descriptiva.
 
-El segundo comando lee `texture_per_region.csv` y guarda
-`figures/glcm_tissue_comparison.png`, con cuatro paneles: contraste,
-homogeneidad, energía y correlación. Cada caja resume los cortes con valores
-finitos para esa combinación de región y propiedad; la línea es la mediana, el
-triángulo es la media y el tamaño muestral aparece en el eje horizontal. El
-gráfico es descriptivo y no incluye pruebas de significancia.
+El segundo comando lee ambas tablas de textura y guarda dos figuras, cada una
+con cuatro paneles: contraste, homogeneidad, energía y correlación. En la figura
+por corte, cada caja resume los cortes con valores finitos; en la figura por
+caso, resume las medias de cortes seleccionados dentro de cada caso. La línea es
+la mediana, el triángulo es la media y el tamaño muestral aparece en el eje
+horizontal. Los gráficos son descriptivos y no incluyen pruebas de significancia.
+
+`figures/glcm_tissue_comparison.png` compara cortes. `figures/glcm_tissue_comparison_by_case.png`
+compara medias de los cortes seleccionados dentro de cada caso y conecta con
+líneas las dos regiones medidas en el mismo caso. En los datos actuales hay 9
+pares completos: un caso no aporta textura tumoral calculable. Las cajas por
+caso muestran variación entre casos, pero no reemplazan una evaluación sobre
+volúmenes completos ni una prueba de significancia.
 
 El comando acepta `--config ruta/a/config.yaml`. Usa el `data_dir` configurado
 sin aplicar el fallback del lanzador; corregir esa ruta si fue necesario el fallback.

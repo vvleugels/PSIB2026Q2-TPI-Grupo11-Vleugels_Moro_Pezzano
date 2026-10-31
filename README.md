@@ -179,10 +179,12 @@ python scripts/plot_features.py
 
 The command reads `<output_dir>/selected_cases_slices.csv` and writes
 `texture_per_region.csv`, `texture_summary.csv`, and `tumor_geometry.csv` under
-`<output_dir>/features/`. The summary reports per-slice means and population standard
-deviations; it does not perform statistical hypothesis tests. The second
-command writes a four-panel boxplot to
-`<output_dir>/features/figures/glcm_tissue_comparison.png`.
+`<output_dir>/features/`. It also writes `texture_per_case.csv`, which averages
+valid selected slices within each case and region. The second command writes
+per-slice and per-case four-panel comparisons under
+`<output_dir>/features/figures/`. Per-case means still describe selected slices,
+not complete patient volumes; the plots are descriptive and perform no
+hypothesis tests.
 
 The command accepts `--config path/to/config.yaml` and uses the configured
 data directory directly, without launcher fallback. Segmentation and features

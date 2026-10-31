@@ -61,6 +61,26 @@ def summarize_texture(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=("region", "feature", "n_slices", "mean", "std"))
 
 
+def summarize_texture_by_case(frame: pd.DataFrame) -> pd.DataFrame:
+    """Average valid selected slices within each case and reference region."""
+    rows = []
+    for case_id in sorted(frame.case_id.unique()):
+        for region_name, _ in REGIONS:
+            selected = frame[(frame.case_id == case_id) & (frame.region == region_name)]
+            valid = selected[TEXTURE_PROPERTIES[0]].notna()
+            row: dict[str, object] = {
+                "case_id": int(case_id),
+                "region": region_name,
+                "n_slices": int(valid.sum()),
+            }
+            for property_name in TEXTURE_PROPERTIES:
+                values = pd.to_numeric(selected[property_name], errors="coerce").dropna()
+                row[property_name] = float(values.mean()) if not values.empty else float("nan")
+            rows.append(row)
+    columns = ("case_id", "region", "n_slices", *TEXTURE_PROPERTIES)
+    return pd.DataFrame(rows, columns=columns)
+
+
 def extract_features(config_path: str | Path | None = None) -> Path:
     """Write per-region texture, per-tumor geometry, and summary CSV tables."""
     cfg = load_config(config_path)
@@ -105,10 +125,12 @@ def extract_features(config_path: str | Path | None = None) -> Path:
     geometry_columns = ("case_id", "slice_index", *GEOMETRY_COLUMNS)
     geometry_frame = pd.DataFrame(geometry_rows, columns=geometry_columns)
     summary = summarize_texture(texture_frame)
+    case_summary = summarize_texture_by_case(texture_frame)
 
     texture_frame.to_csv(output_dir / "texture_per_region.csv", index=False)
     geometry_frame.to_csv(output_dir / "tumor_geometry.csv", index=False)
     summary.to_csv(output_dir / "texture_summary.csv", index=False)
+    case_summary.to_csv(output_dir / "texture_per_case.csv", index=False)
     print(f"Saved feature tables for {len(selection)} selected slices under {output_dir}", flush=True)
     return output_dir
 

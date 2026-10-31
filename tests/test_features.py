@@ -1,11 +1,34 @@
 import unittest
 
 import numpy as np
+import pandas as pd
 
+from scripts.extract_features import summarize_texture_by_case
 from psib.features import extract_geometric_features, extract_texture_features
 
 
 class FeatureTests(unittest.TestCase):
+    def test_texture_summary_averages_slices_within_case_and_keeps_missing_regions(self):
+        frame = pd.DataFrame([
+            {"case_id": 1, "region": "tumor_reference", "contrast": 1.0,
+             "homogeneity": 0.2, "energy": 0.3, "correlation": 0.4},
+            {"case_id": 1, "region": "tumor_reference", "contrast": 3.0,
+             "homogeneity": 0.4, "energy": 0.5, "correlation": 0.6},
+            {"case_id": 1, "region": "healthy_liver_reference", "contrast": 0.5,
+             "homogeneity": 0.7, "energy": 0.8, "correlation": 0.9},
+            {"case_id": 2, "region": "tumor_reference", "contrast": np.nan,
+             "homogeneity": np.nan, "energy": np.nan, "correlation": np.nan},
+            {"case_id": 2, "region": "healthy_liver_reference", "contrast": 1.5,
+             "homogeneity": 0.6, "energy": 0.7, "correlation": 0.8},
+        ])
+
+        summary = summarize_texture_by_case(frame).set_index(["case_id", "region"])
+
+        self.assertEqual(summary.loc[(1, "tumor_reference"), "n_slices"], 2)
+        self.assertEqual(summary.loc[(1, "tumor_reference"), "contrast"], 2.0)
+        self.assertEqual(summary.loc[(2, "tumor_reference"), "n_slices"], 0)
+        self.assertTrue(np.isnan(summary.loc[(2, "tumor_reference"), "contrast"]))
+
     def test_geometry_reports_one_row_per_eight_connected_component(self):
         mask = np.zeros((8, 9), dtype=bool)
         mask[1, 1] = mask[2, 2] = True  # Diagonal pixels are connected.
