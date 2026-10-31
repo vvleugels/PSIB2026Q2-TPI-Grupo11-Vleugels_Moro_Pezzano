@@ -35,7 +35,6 @@ consultar este documento junto con el código y los tests.
 | `src/psib/segmentation.py` | Umbrales 2D, morfología y componentes conectados |
 | `src/psib/metrics.py` | Dice e IoU entre máscaras binarias |
 | `scripts/` | Exploración, selección, figuras y experimentos de segmentación |
-| `notebooks/` | Ejemplos interactivos de exploración y preprocesamiento |
 | `tests/` | Tests sintéticos con `unittest` |
 | `data/` | Datos locales, ignorados por Git |
 | `results/` | Tablas y figuras generadas, ignoradas por Git |
@@ -53,7 +52,6 @@ La versión objetivo es **Python 3.12**. Ejecutar desde la raíz del repositorio
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-python -m pip install -r requirements-notebooks.txt  # opcional
 ```
 
 Si `.venv` ya existe, alcanza con activarlo. Comprobar el intérprete con
@@ -66,15 +64,27 @@ Python instalada en el sistema.
 py -3.12 -m venv .venv
 .venv\Scripts\activate.bat
 python -m pip install -r requirements.txt
-python -m pip install -r requirements-notebooks.txt
 ```
 
 No copiar el entorno virtual entre sistemas operativos.
 
+En Windows se puede ejecutar `Run_TPI.bat` con doble clic. Crea `.venv` si
+falta y, en cada ejecución, instala los requisitos faltantes o desactualizados
+y ejecuta `pip check`. Luego llama a `scripts/run_tpi.py`, que usa `data_dir`
+con la precedencia habitual de `config.local.yaml`. Si no encuentra pares
+CT/máscara, intenta `data/Selected_database/`; si tampoco encuentra pares allí,
+termina con un error. No modifica los archivos YAML del usuario.
+
+La selección 2D y la segmentación base comparten la configuración resuelta.
+El identificador usa la hora local con formato `YYYYMMDD-HHMMSS`; las salidas
+van a `<output_dir>/segmentation/<identificador>/`. Si ya existe, esperar un
+segundo y volver a ejecutar. Un fallo de instalación o de `pip check` detiene
+el flujo antes de procesar datos.
+
 Las dependencias base son NumPy, SciPy, scikit-image, NiBabel, Matplotlib,
 OpenCV, pandas y PyYAML. OpenCV está declarado como dependencia, aunque los
-módulos actuales no lo importan. El archivo opcional agrega JupyterLab,
-nbformat y nbclient, e incluye a su vez los requisitos base.
+módulos actuales no lo importan. Todos los flujos se ejecutan con Python
+y las dependencias de `requirements.txt`.
 
 Los requisitos expresan versiones mínimas, no versiones exactas. Para reproducir
 experimentos, conservar además las versiones efectivamente instaladas.
@@ -358,8 +368,8 @@ debe conservarla quien llama a la función.
 
 ## 10. Ejemplo integrado de uso manual
 
-Ejecutar este código desde la raíz con el entorno activado, en Python o en
-un notebook. Requiere haber generado previamente el CSV de selección.
+Ejecutar este código desde la raíz con el entorno activado, en Python.
+Requiere haber generado previamente el CSV de selección.
 Procesa un único corte y muestra sus métricas; no guarda archivos.
 
 ```python
@@ -400,16 +410,38 @@ Si el corte no contiene hígado, no puede usarse `preprocess_slice` porque
 intenta recortarlo. El ejecutor utiliza directamente ventana y filtrado, sin recorte, y puede
 procesar esos cortes con predicción vacía.
 
-## 11. Notebooks y tests
+## 11. Comparación de filtros y tests
 
-`00_dataset_exploration.ipynb` contiene celdas de inventario y selección de
-casos. `01_preprocessing.ipynb` carga el CSV de selección y compara filtros
-y recortes. Son ejemplos de exploración y preprocesamiento, no ejecutores
-del barrido de segmentación. Abrirlos desde la raíz o desde `notebooks/`,
-respetando el cálculo de `ROOT` de sus celdas iniciales.
+La exploración y selección se ejecutan con `explore_dataset.py` y
+`select_cases.py`; `preprocess_selected.py` genera las vistas de ventana HU,
+filtrado y recorte. Para una selección con lectura por cortes, usar
+`select_slices_2d.py`.
+
+Después de generar `selected_cases_slices.csv`, comparar los filtros con:
 
 ```bash
-python -m jupyterlab
+python scripts/compare_filters.py
+python scripts/compare_filters.py --config /ruta/a/config.yaml
+```
+
+El script toma el primer par caso/corte del CSV y lee únicamente ese corte 2D.
+Respeta la precedencia de `config.local.yaml`, la ventana HU y los parámetros
+configurados de mediana, gaussiano y bilateral. Guarda cuatro paneles con la
+misma escala `[0, 1]` y orientación en
+`figures/filter_comparison_case_<id>_slice_<index>.png`, bajo el directorio de
+salida configurado (identificadores con ceros a la izquierda). No abre una
+ventana gráfica. Si falta el CSV o está vacío, informa un error.
+
+Registrar la ventana y los parámetros elegidos; comparar reducción de ruido y
+visibilidad de los bordes hepáticos y tumorales. La comparación visual no es
+una métrica de precisión de segmentación. Los recortes de preprocesamiento
+usan la máscara hepática de referencia; su caja `(x0, y0, x1, y1)` permite
+sumar el origen a coordenadas locales para volver al corte completo. La
+selección usa las máscaras de referencia y mantiene ese sesgo de muestreo.
+
+Validar con datos sintéticos:
+
+```bash
 python -m unittest
 python -m unittest tests.test_metrics
 python -m unittest tests.test_segmentation
@@ -421,9 +453,11 @@ python -m pip check
 | `test_data_io.py` | Pares NIfTI sintéticos, orientación, espaciado y caso faltante |
 | `test_dataset.py` | Muestreo, volumen físico, componentes y selección reproducible |
 | `test_preprocessing.py` | Ventana, coordenadas de recorte, forma y dtype de filtros |
+| `test_compare_filters.py` | Comparación sin GUI, parámetros, orientación, lectura de un corte y errores de selección |
 | `test_metrics.py` | Casos idénticos, disjuntos, vacíos, solapamiento y validación |
 | `test_segmentation.py` | Umbrales, región hepática, morfología, conectividad y contrato |
 | `test_run_segmentation.py` | Ejecución, exportación, agregación, barrido, fallos y reproducibilidad |
+| `test_run_tpi.py` | Directorio configurado, fallback, precedencia local, ID temporal y ejecución integrada |
 | `test_slice_io.py` | Lectura por planos, orientación, rango de etiquetas y selección 2D |
 
 La suite incluye tests sintéticos del ejecutor y no requiere los datos reales. Estos tests no
@@ -445,7 +479,7 @@ de los tres scripts sobre todos los volúmenes.
 | Valores HU enviados a segmentación | Usar la imagen normalizada `denoised` |
 | Formas distintas en segmentación o métricas | Conservar las coordenadas completas o reconstruir el recorte; no redimensionar para ocultar el desajuste |
 
-La revisión incluyó los módulos, scripts, configuración, notebooks y tests.
+La revisión incluyó los módulos, scripts, configuración y tests.
 La revisión se complementa con la suite sintética. Los archivos de ejecuciones
 locales se guardan en `results/`, fuera de Git.
 

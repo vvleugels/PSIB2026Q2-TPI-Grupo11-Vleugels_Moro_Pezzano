@@ -11,43 +11,31 @@ if not exist ".venv\Scripts\python.exe" (
         pause
         exit /b 1
     )
-    ".venv\Scripts\python.exe" -m pip install -r requirements.txt
-    if errorlevel 1 (
-        echo.
-        echo Dependency installation failed. Check your internet connection and try again.
-        pause
-        exit /b 1
-    )
 )
 
-if not exist "data\Selected_database" (
-    echo.
-    echo The bundled data folder data\Selected_database was not found.
-    echo Restore it or update data_dir in config.yaml.
-    pause
-    exit /b 1
-)
-
-echo Selecting 2D slices from the configured cases...
-".venv\Scripts\python.exe" scripts\select_slices_2d.py
+echo Checking and installing required packages...
+".venv\Scripts\python.exe" -m pip install -r requirements.txt
 if errorlevel 1 (
     echo.
-    echo Slice selection failed. See the error above.
+    echo Dependency installation failed. Check your internet connection and try again.
     pause
     exit /b 1
 )
-
-set "RUN_ID=base-%RANDOM%"
-echo Running the baseline segmentation experiment (%RUN_ID%)...
-".venv\Scripts\python.exe" scripts\run_segmentation.py --run-id "%RUN_ID%"
+".venv\Scripts\python.exe" -m pip check
 if errorlevel 1 (
     echo.
-    echo The segmentation experiment failed. See the error above.
+    echo The environment has incompatible dependencies. Resolve the errors above and try again.
     pause
     exit /b 1
 )
 
-echo.
-echo TPI run completed. Results are in results\segmentation\%RUN_ID%.
+".venv\Scripts\python.exe" scripts\run_tpi.py
+if errorlevel 1 (
+    echo.
+    echo TPI failed. See the error above.
+    pause
+    exit /b 1
+)
+
 pause
 endlocal
