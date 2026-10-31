@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 import sys
 
@@ -82,7 +83,7 @@ def summarize_texture_by_case(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def summarize_paired_texture_differences(case_frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Calculate tumor-minus-healthy differences for cases with both regions."""
+    """Summarize paired differences and exact sign tests by GLCM property."""
     details = []
     summaries = []
     for property_name in TEXTURE_PROPERTIES:
@@ -109,17 +110,47 @@ def summarize_paired_texture_differences(case_frame: pd.DataFrame) -> tuple[pd.D
             "n_tumor_higher": int((differences > 0).sum()),
             "n_liver_higher": int((differences < 0).sum()),
             "n_equal": int((differences == 0).sum()),
+            "n_nonzero": int((differences != 0).sum()),
+            "p_sign_test": _exact_sign_test_pvalue(
+                int((differences > 0).sum()), int((differences < 0).sum())
+            ),
         })
+    adjusted = _holm_adjust([row["p_sign_test"] for row in summaries])
+    for row, p_value in zip(summaries, adjusted):
+        row["p_holm"] = p_value
     detail_columns = (
         "case_id", "feature", "tumor_reference", "healthy_liver_reference",
         "difference_tumor_minus_liver",
     )
     summary_columns = (
         "feature", "n_pairs", "mean_difference", "median_difference", "std_difference",
-        "n_tumor_higher", "n_liver_higher", "n_equal",
+        "n_tumor_higher", "n_liver_higher", "n_equal", "n_nonzero", "p_sign_test", "p_holm",
     )
     return (pd.DataFrame(details, columns=detail_columns),
             pd.DataFrame(summaries, columns=summary_columns))
+
+
+def _exact_sign_test_pvalue(n_positive: int, n_negative: int) -> float:
+    """Two-sided exact sign-test p-value, excluding tied pairs."""
+    n = n_positive + n_negative
+    if n == 0:
+        return float("nan")
+    lower_tail = min(n_positive, n_negative)
+    probability = sum(math.comb(n, k) for k in range(lower_tail + 1)) / (2 ** n)
+    return min(1.0, 2.0 * probability)
+
+
+def _holm_adjust(p_values: list[float]) -> list[float]:
+    """Return Holm-adjusted p-values, preserving NaNs and original order."""
+    adjusted = [float("nan")] * len(p_values)
+    valid = [(index, value) for index, value in enumerate(p_values) if np.isfinite(value)]
+    valid.sort(key=lambda item: item[1])
+    running_max = 0.0
+    count = len(valid)
+    for rank, (index, value) in enumerate(valid):
+        running_max = max(running_max, min(1.0, (count - rank) * value))
+        adjusted[index] = running_max
+    return adjusted
 
 
 def extract_features(config_path: str | Path | None = None) -> Path:

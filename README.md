@@ -186,8 +186,11 @@ per-slice and per-case four-panel comparisons under
 not complete patient volumes; the plots are descriptive and perform no
 hypothesis tests. The extractor also writes per-case paired differences
 (tumor minus healthy liver) to `texture_case_differences.csv` and their summary
-to `texture_difference_summary.csv`. The summary reports their direction and
-spread; it does not calculate p-values.
+to `texture_difference_summary.csv`. The summary includes an exact two-sided
+sign test per property and Holm-adjusted p-values across the four properties.
+These exploratory tests use paired case averages, exclude ties from the sign
+test, and do not replace validation against independent segmentation ground
+truth; interpretation is limited by the small number of selected cases.
 
 The command accepts `--config path/to/config.yaml` and uses the configured
 data directory directly, without launcher fallback. Segmentation and features

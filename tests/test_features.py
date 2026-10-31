@@ -3,7 +3,12 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from scripts.extract_features import summarize_paired_texture_differences, summarize_texture_by_case
+from scripts.extract_features import (
+    _exact_sign_test_pvalue,
+    _holm_adjust,
+    summarize_paired_texture_differences,
+    summarize_texture_by_case,
+)
 from psib.features import extract_geometric_features, extract_texture_features
 
 
@@ -36,6 +41,16 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(contrast.mean_difference, 1.5)
         self.assertEqual(contrast.n_tumor_higher, 1)
         self.assertEqual(contrast.n_liver_higher, 0)
+        self.assertEqual(contrast.n_nonzero, 1)
+        self.assertEqual(contrast.p_sign_test, 1.0)
+        self.assertEqual(contrast.p_holm, 1.0)
+
+    def test_exact_sign_test_and_holm_adjustment(self):
+        self.assertEqual(_exact_sign_test_pvalue(3, 6), 0.5078125)
+        self.assertTrue(np.isnan(_exact_sign_test_pvalue(0, 0)))
+        adjusted = _holm_adjust([0.01, 0.04, 0.03, np.nan])
+        np.testing.assert_allclose(adjusted[:3], [0.03, 0.06, 0.06])
+        self.assertTrue(np.isnan(adjusted[3]))
 
     def test_geometry_reports_one_row_per_eight_connected_component(self):
         mask = np.zeros((8, 9), dtype=bool)

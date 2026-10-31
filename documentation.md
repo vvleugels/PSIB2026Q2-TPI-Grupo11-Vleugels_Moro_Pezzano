@@ -788,14 +788,18 @@ normalizada mediante `prepare_denoised_slice` y escribe estos archivos en
 | `texture_summary.csv` | Media y desvío estándar poblacional por región y propiedad, con cantidad de cortes válidos |
 | `texture_per_case.csv` | Una fila por caso y región, con medias de los cortes seleccionados y número de cortes válidos |
 | `texture_case_differences.csv` | Una fila por caso y propiedad, con textura tumoral menos textura de hígado sano |
-| `texture_difference_summary.csv` | Media, mediana, desvío poblacional y dirección de las diferencias entre casos emparejados |
+| `texture_difference_summary.csv` | Media, mediana, desvío poblacional, dirección, prueba exacta de signos y p ajustado por Holm para las diferencias entre casos emparejados |
 | `tumor_geometry.csv` | Una fila por componente tumoral 8-conectado, con características geométricas y ubicación de caso/corte |
 
 `pair_count` cuenta los pares espaciales válidos antes de simetrizar cada GLCM;
 `n_offsets` cuenta las combinaciones distancia/ángulo que aportaron pares. Las
 propiedades sin pares válidos son NaN. En la tabla de resumen, `n_slices` ignora
 esos valores NaN para cada propiedad. Las máscaras de referencia definen ambas
-regiones, por lo que la comparación de tejidos es descriptiva.
+regiones, por lo que la comparación de tejidos es descriptiva. Para las
+diferencias por caso, la prueba exacta bilateral de signos evalúa si hay una
+dirección consistente (los empates se excluyen del contraste), y Holm corrige
+las cuatro comparaciones GLCM. Es un análisis exploratorio con pocos casos
+seleccionados, no una validación independiente de la segmentación.
 
 El segundo comando lee ambas tablas de textura y guarda dos figuras, cada una
 con cuatro paneles: contraste, homogeneidad, energía y correlación. En la figura
