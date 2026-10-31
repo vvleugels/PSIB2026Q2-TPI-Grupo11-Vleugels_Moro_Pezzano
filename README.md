@@ -17,7 +17,6 @@ Python 3.12 is the target version. From this repository root:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-python -m pip install -r requirements-notebooks.txt  # optional notebooks
 ```
 
 ### Windows (CMD)
@@ -28,11 +27,21 @@ Install 64-bit Python 3.12, then run these commands from the project folder:
 py -3.12 -m venv .venv
 .venv\Scripts\activate.bat
 python -m pip install -r requirements.txt
-python -m pip install -r requirements-notebooks.txt
 ```
 
-The notebook dependencies are optional for the scripts and library. Do not copy
-a virtual environment between operating systems.
+Do not copy a virtual environment between operating systems.
+
+On Windows, double-click `Run_TPI.bat` to set up or reuse `.venv` and run the
+baseline workflow. Every launch installs any missing or outdated requirements
+and runs `pip check` before proceeding. It uses the configured `data_dir`
+(including `config.local.yaml` precedence), then falls back to
+`data/Selected_database/` if no paired CT/mask cases are found. If neither
+location has paired cases, it stops with an error. The fallback does not edit
+your configuration files.
+
+Run IDs use local time in `YYYYMMDD-HHMMSS` format, for example
+`20261031-180409`. Results go to `<output_dir>/segmentation/<run-id>/`.
+If that run already exists, wait a second and launch again.
 
 ## Data and configuration
 
@@ -78,10 +87,27 @@ the 70 unlabeled test cases are excluded. The second script selects 10 cases
 from that pool and writes `results/selected_cases_slices.csv`. It stops with an
 explicit error if the pool cannot cover all three tumor-volume terciles or has
 no multi-lesion cases. The third saves HU-window, denoised, and liver-cropped
-figures for the selected slices. The notebooks
-`00_dataset_exploration.ipynb` and `01_preprocessing.ipynb` are unexecuted
-teaching/report skeletons. Selection uses reference masks and is intended for
-report examples, not as an unbiased cohort.
+figures for the selected slices. Selection uses reference masks and is intended
+for report examples, not as an unbiased cohort.
+
+Compare all three denoising filters on the first selected slice with:
+
+```bash
+python scripts/compare_filters.py
+# Optional configuration file (a sibling config.local.yaml takes precedence):
+python scripts/compare_filters.py --config /path/to/config.yaml
+```
+
+Run either selection script first to create `selected_cases_slices.csv`.
+The comparison reads only the selected 2D slice and saves a four-panel figure
+(windowed input, median, Gaussian, bilateral) under the configured output folder
+as `figures/filter_comparison_case_<id>_slice_<index>.png` (zero-padded IDs).
+It uses the configured HU window and each filter's parameters, with a common
+`[0, 1]` display scale. Review boundary visibility and noise reduction together;
+this comparison does not measure segmentation accuracy. Preprocessing figures
+also show the liver crop, which uses the reference mask. Crop boxes are
+`(x0, y0, x1, y1)`; add their origin to crop-local coordinates when mapping back
+to the full slice.
 
 ## Array convention
 
@@ -139,6 +165,7 @@ deviations; it does not perform statistical hypothesis tests.
 | `scripts/explore_dataset.py` | Inventory CSV and context figures | Person A |
 | `scripts/select_cases.py` | Selected case/slice CSV | Person A |
 | `scripts/preprocess_selected.py` | Selected-slice preprocessing figures | Person A |
+| `scripts/compare_filters.py` | First-selected-slice denoising comparison | Person A |
 | `tests/test_data_io.py` | Synthetic NIfTI pairing, orientation, spacing, loading checks | Person A |
 | `tests/test_dataset.py` | Candidate sampling, tumor volume, lesions, slice-gap checks | Person A |
 | `tests/test_preprocessing.py` | Windowing, crop coordinates, filter shape/dtype checks | Person A |
