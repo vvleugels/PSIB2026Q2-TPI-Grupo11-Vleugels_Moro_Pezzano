@@ -83,12 +83,17 @@ mantienen en 2D sobre los cortes seleccionados.
 | `src/psib/morphology3d.py` | Medidas físicas de componentes tumorales 3D |
 | `scripts/analyze_morphology_3d.py` | CSV y superficies 3D de los casos seleccionados |
 | `src/psib/gui_model.py` | Estado de sidebar y persistencia del perfil, sin dependencias Tk |
+| `src/psib/app_icon.py` | Rutas de iconos y carga defensiva con fallback |
 | `scripts/gui.py` | GUI con sidebar seccionado, visor compartido y ejecución en segundo plano |
 | `tests/test_gui_model.py` | Estado, expansión, persistencia y clamp de ancho del sidebar |
+| `tests/test_app_icon.py` | Construcción determinista, tamaños ICO y fallback sin display |
+| `scripts/build_icons.py` | Derivación determinista de PNG, ICO y logo desde el master |
+| `scripts/create_shortcut.ps1` | Accesos directos locales Windows, sin elevación |
+| `scripts/psib.desktop.template` | Plantilla opcional para escritorios Linux |
 | `scripts/select_cases.py` | Selección por terciles de volumen tumoral |
 | `scripts/preprocess_selected.py` | Figuras de ventana, filtrado y recorte |
-| `Run_TPI.bat` | Preparación del entorno Windows y llamada al lanzador Python |
-| `Run_TPI_GUI.bat` | Preparación del entorno Windows y apertura del GUI |
+| `PSIB.bat` | Preparación del entorno Windows, comprobación de dependencias y apertura del GUI |
+| `scripts/check_requirements.py` | Comprueba las dependencias directas antes de iniciar el GUI |
 | `scripts/gui.py` | Interfaz de escritorio para el flujo 2D y el análisis morfológico 3D opcional |
 | `tests/` | Tests sintéticos con `unittest` |
 | `data/` | Datos locales, ignorados por Git |
@@ -124,11 +129,11 @@ python -m pip install -r requirements.txt
 
 No copiar el entorno virtual entre sistemas operativos.
 
-En Windows se puede ejecutar `Run_TPI.bat` con doble clic. Crea `.venv` si
-falta y, en cada ejecución, ejecuta `pip install -r requirements.txt`
-y `pip check`. Conserva los paquetes que ya satisfacen las restricciones; no
-actualiza todos los paquetes a la última versión. Luego llama a
-`scripts/run_tpi.py`, que usa `data_dir`
+En Windows se puede ejecutar `PSIB.bat` con doble clic. Crea `.venv` si
+falta y verifica las versiones de todos los requisitos directos. Solo ejecuta
+`pip install -r requirements.txt` si falta alguna dependencia o su versión no
+cumple la restricción; después comprueba consistencia con `pip check`. Luego
+abre la GUI. El flujo Python `scripts/run_tpi.py` usa `data_dir`
 con la precedencia habitual de `config.local.yaml`. Si no encuentra pares
 CT/máscara, intenta `data/Selected_database/`; si tampoco encuentra pares allí,
 termina con un error. No modifica los archivos YAML del usuario.
@@ -136,10 +141,10 @@ termina con un error. No modifica los archivos YAML del usuario.
 Instalar Python 3.12 de 64 bits con el lanzador `py` para crear el entorno.
 La ejecución nativa del archivo BAT no se ha verificado desde el entorno Linux.
 
-Para usar la interfaz gráfica, ejecutar `Run_TPI_GUI.bat`. La ventana ofrece
+Para usar la interfaz gráfica, ejecutar `PSIB.bat`. La ventana ofrece
 cinco secciones desplazables en una sidebar izquierda que se puede contraer con
-el chevron o `Ctrl+B`; el visor ocupa el área derecha. La sección **Caso** carga
-un caso y permite recorrer cortes, **Preprocesamiento** y **Segmentación**
+el chevron o `Ctrl+B`; el visor ocupa el área derecha. La sección **Caso** permite
+elegir un caso (se carga solo al seleccionarlo) y recorrer cortes, **Preprocesamiento** y **Segmentación**
 actualizan el corte visible, **Cuantificación** ejecuta el análisis 3D de
 referencia y **Resultados** lista figuras/CSV junto con sus explicaciones y el
 registro. El pie fijo mantiene visibles los pasos, el progreso, Cancelar y la
@@ -297,7 +302,7 @@ Los scripts individuales no aplican fallback; si se utilizó, corregir `data_dir
 antes de comparar filtros o ejecutar un barrido con la misma selección.
 
 La llamada directa a Python no instala dependencias. En Windows,
-`Run_TPI.bat` prepara y verifica el entorno antes de llamar a este flujo.
+`PSIB.bat` prepara y verifica el entorno antes de abrir la GUI.
 Las salidas de segmentación se describen en la sección 14.
 
 ### Flujo opcional: exploración volumétrica
@@ -936,3 +941,31 @@ versus referencia 3D. El panel 3D presenta la morfología calculada desde las
 etiquetas de referencia. Los controles de segmento actual son una vista previa;
 el botón de ejecución usa los parámetros visibles y genera los resultados 2D
 reproducibles del pipeline.
+
+### Iconos de aplicación
+
+El diseño fuente suministrado está en `assets/icon/liver_tumor_app_icon.png`.
+`python scripts/build_icons.py` lo reconoce y crea la copia canónica
+`assets/icon/psib_icon_master.png` junto con PNG de 16, 24,
+32, 48, 64, 128, 256 y 512 px, el multi-size `assets/icon/psib.ico` y
+`assets/logo.png` de 56 px (2× el icono de 28 px del encabezado). El script usa
+Pillow, LANCZOS, no cambia el master y puede repetirse. No genera figuras nuevas
+ni redibuja el diseño. Tras añadir el master, revisar visualmente los PNG de 16
+y 32 px, en particular que siga distinguiéndose el círculo tumoral.
+
+`src/psib/app_icon.py` calcula las rutas y carga las imágenes después de crear
+Tk; conserva las referencias `PhotoImage` en la instancia de la GUI. Si falta
+cualquier PNG, el ICO, el logo, o falla la lectura, el cargador emite una
+advertencia y la interfaz continúa sin icono. El icono de ventana usa los PNG
+de 16, 32, 48 y 64 px; Windows intenta además `iconbitmap` con el ICO. Antes de
+crear la raíz Tk, `scripts/gui.py` fija el Windows AppUserModelID
+`ITBA.PSIB.LiverTumorGUI` para asociar correctamente el icono de la aplicación
+con su ventana y la barra de tareas.
+
+En Windows, `PSIB.bat` prepara el entorno, instala y verifica las dependencias, y abre la GUI. Para crear accesos `PSIB.lnk`
+en el escritorio y en la raíz del proyecto, ejecutar
+`powershell -NoProfile -File .\scripts\create_shortcut.ps1`. El script configura
+destino, directorio de trabajo, icono y estado minimizado sin requerir permisos
+de administrador. Los accesos directos son locales e ignorados por Git. En
+Linux, completar `<project-root>` en `scripts/psib.desktop.template`; el campo
+`Icon` apunta al PNG de 256 px.

@@ -8,6 +8,7 @@ import re
 import json
 import csv
 import gc
+import ctypes
 import subprocess
 import sys
 import threading
@@ -27,6 +28,7 @@ from psib.data_io import list_cases, load_case, iter_case_slices
 from psib.preprocessing import prepare_denoised_slice, enhance, liver_bounding_box
 from psib.segmentation import segment_slice
 from psib.metrics import dice_score, iou_score
+from psib.app_icon import load_icon_images, warn_icon_once
 from scipy import ndimage
 
 DEFAULT_CONFIG = ROOT / "config.yaml"
@@ -37,6 +39,33 @@ IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 class TpiLauncher:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
+        self.pending_icon_warning: str | None = None
+        self.icon_assets = load_icon_images(
+            ROOT, lambda path: tk.PhotoImage(master=root, file=str(path)),
+            warning_callback=self.queue_icon_warning,
+        )
+        self._icon_references: tuple[object, ...] = ()
+        self._sidebar_logo = self._rail_icon = None
+        if self.icon_assets is not None:
+            try:
+                self._icon_references = (*self.icon_assets["window"], self.icon_assets["logo"],
+                                         self.icon_assets["rail"])
+                self._sidebar_logo = self.icon_assets["logo"].subsample(2, 2)
+                self._rail_icon = self.icon_assets["rail"]
+                self._icon_references += (self._sidebar_logo,)
+                root.iconphoto(True, *self.icon_assets["window"])
+                if sys.platform == "win32":
+                    try:
+                        root.iconbitmap(str(self.icon_assets["ico"]))
+                    except Exception as exc:
+                        warn_icon_once(f"The Windows ICO could not be applied ({exc}); using the PNG window icons.",
+                                       warning_callback=self.queue_icon_warning)
+            except Exception as exc:
+                self.icon_assets = None
+                self._icon_references = ()
+                self._sidebar_logo = self._rail_icon = None
+                warn_icon_once(f"Application icon could not be applied ({exc}); continuing without a custom icon.",
+                               warning_callback=self.queue_icon_warning)
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.process: subprocess.Popen[str] | None = None
         self.cancel_requested = False
@@ -94,6 +123,8 @@ class TpiLauncher:
         self.status_label.pack(side="left", padx=(7, 0))
         self.log_meta = tk.StringVar(value="LISTO PARA EJECUTAR")
         self.build_log(self.sections["Resultados"])
+        if self.pending_icon_warning:
+            self.append_log(f"Advertencia: {self.pending_icon_warning}")
         self.bind_sidebar_shortcuts()
         self.load_latest_results()
         self.load_morphology_results()
@@ -114,6 +145,8 @@ class TpiLauncher:
         self.sidebar_content.rowconfigure(2, weight=1)
         header = ttk.Frame(self.sidebar_content, style="Panel.TFrame", padding=(12, 10, 8, 8))
         header.grid(row=0, column=0, sticky="ew")
+        if self._sidebar_logo is not None:
+            ttk.Label(header, image=self._sidebar_logo, style="Body.TLabel").pack(side="left", padx=(0, 7))
         ttk.Label(header, text="PSIB · TPI", style="SidebarTitle.TLabel").pack(side="left")
         self.collapse_button = ttk.Button(header, text="◀", width=3, style="Rail.TButton",
                                           command=self.toggle_sidebar)
@@ -173,6 +206,8 @@ class TpiLauncher:
         self.run_button.pack(side="left", fill="x", expand=True, padx=(0, 6))
 
         self.sidebar_rail = ttk.Frame(self.sidebar, style="Panel.TFrame", padding=(3, 5))
+        if self._rail_icon is not None:
+            ttk.Label(self.sidebar_rail, image=self._rail_icon, style="Body.TLabel").pack(fill="x", pady=(0, 5))
         self.rail_toggle = ttk.Button(self.sidebar_rail, text="▶", width=4, style="Rail.TButton",
                                       command=self.toggle_sidebar)
         self.rail_toggle.pack(fill="x", pady=(0, 7))
@@ -435,9 +470,11 @@ class TpiLauncher:
             cases = []
             self.case_info.set(f"No se pudo leer la base: {exc}")
         self.case_combo["values"] = [f"{case:03d}" for case in cases]
-        if cases and not self.case_var.get():
-            self.case_var.set(f"{cases[0]:03d}")
-            self.select_case()
+        if not self.case_var.get():
+            self.case_info.set(
+                f"{len(cases)} casos disponibles. Elegí un caso para cargar su volumen y etiquetas."
+                if cases else "No se encontraron casos disponibles."
+            )
 
     def browse_volume(self) -> None:
         selected = filedialog.askopenfilename(title="Elegir volumen LiTS",
@@ -850,6 +887,10 @@ class TpiLauncher:
         self.status_dot.configure(style=label_style)
         self.status_label.configure(style=label_style)
 
+    def queue_icon_warning(self, message: str) -> None:
+        """Hold the single icon warning until the GUI log widget exists."""
+        self.pending_icon_warning = message
+
     def load_latest_results(self) -> None:
         """Show figures from the latest completed run for the selected output directory."""
         try:
@@ -1257,6 +1298,11 @@ class TpiLauncher:
 
 
 def main() -> None:
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ITBA.PSIB.LiverTumorGUI")
+        except Exception:
+            pass
     root = tk.Tk()
     TpiLauncher(root)
     root.mainloop()

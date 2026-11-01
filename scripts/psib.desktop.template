@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=PSIB Liver Tumor GUI
+Comment=Run the PSIB image-processing practical
+Exec=python3 <project-root>/scripts/gui.py
+Path=<project-root>
+Icon=<project-root>/assets/icon/psib_icon_256.png
+Terminal=false
+Categories=Science;MedicalSoftware;Graphics;

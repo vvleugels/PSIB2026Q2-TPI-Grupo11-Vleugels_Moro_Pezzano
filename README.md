@@ -1,5 +1,7 @@
 # PSIB 2026 Q2 — Liver CT practical project
 
+<p><img src="assets/icon/psib_icon_256.png" width="96" alt="PSIB application icon"></p>
+
 Python tools for exploring labeled liver CT data, selecting axial slices,
 comparing denoising filters, and running classical 2D tumor segmentation with
 Dice/IoU evaluation. Reusable code lives in `src/psib/`; runnable workflows live
@@ -28,11 +30,10 @@ python -m pip check
 ### Windows (CMD)
 
 Install 64-bit Python 3.12 and its `py` launcher. For automatic setup and a
-baseline run, double-click `Run_TPI.bat`. It creates `.venv` if needed, runs
-`pip install -r requirements.txt` on every launch, and checks dependency
-compatibility with `pip check`. A failed check stops the workflow. Packages
-that already satisfy the requirements are retained; this does not upgrade
-everything to the latest release. Native Windows execution has not been tested
+GUI startup, double-click `PSIB.bat`. It creates `.venv` if needed and checks
+whether each required library is installed at a compatible version. It only
+runs `pip install -r requirements.txt` when a library is missing or incompatible,
+then checks dependency consistency with `pip check`. Native Windows execution has not been tested
 in the Linux development environment.
 
 For manual setup:
@@ -76,19 +77,20 @@ python scripts/run_tpi.py --config path/to/config.yaml
 ```
 
 Calling the Python workflow directly assumes dependencies are already installed;
-the automatic dependency checks are performed by `Run_TPI.bat`.
+the automatic dependency checks are performed by `PSIB.bat`.
 
 ### Windows graphical launcher
 
-From File Explorer, double-click `Run_TPI_GUI.bat`. From PowerShell at the
+From File Explorer, double-click `PSIB.bat`. From PowerShell at the
 repository root, run:
 
 ```powershell
-.\Run_TPI_GUI.bat
+.\PSIB.bat
 ```
 
-The launcher creates `.venv` if needed, installs/checks the dependencies, and
-opens the GUI. A collapsible left sidebar holds five scrollable sections:
+The launcher creates `.venv` if needed, checks installed dependencies, and only
+installs or repairs them when a check fails. It opens the GUI without loading
+a volume; choose a case in **Caso** when you are ready. A collapsible left sidebar holds five scrollable sections:
 **Caso**, **Preprocesamiento**, **Segmentación**, **Cuantificación**, and
 **Resultados**. The right side stays dedicated to the image viewer. Collapse the
 sidebar with its chevron or **Ctrl+B**; in the narrow rail, click a section icon
@@ -110,6 +112,25 @@ largest component's bounding-box diagonal. Automatic 3D segmentation and
 automatic-versus-reference 3D error are not implemented; this task describes
 the reference masks only. The log is available at the bottom of the
 **Resultados** section.
+
+#### Application icon and desktop shortcut
+
+The supplied 1024×1024 artwork is `assets/icon/liver_tumor_app_icon.png`.
+Run `python scripts/build_icons.py` from the repository root; it recognizes that
+filename and creates the canonical master copy. It deterministically
+creates the PNG sizes, Windows multi-size `psib.ico`, and `assets/logo.png` used
+in the sidebar. Commit the master and these generated assets so other users get
+the icon without rebuilding it.
+
+Create `PSIB.lnk` in both the project root and Desktop with:
+
+```powershell
+powershell -NoProfile -File .\scripts\create_shortcut.ps1
+```
+
+The shortcut runs the GUI launcher minimized. `PSIB.lnk` is local and ignored by
+Git. On Linux, copy `scripts/psib.desktop.template`, replace its
+`<project-root>` paths, and use the 256 px PNG as its `Icon` value.
 
 ## Data and configuration
 
@@ -285,6 +306,7 @@ denoised images, without enhancement or cropping.
 | `src/psib/features.py` | 2D lesion geometry and masked GLCM texture |
 | `src/psib/visualization.py` | Prediction/reference contour overlays |
 | `src/psib/gui_model.py` | Display-independent sidebar state and profile persistence |
+| `src/psib/app_icon.py` | Icon path discovery and safe Tk image loading |
 | `scripts/run_tpi.py` | Automatic selection and timestamped baseline run |
 | `scripts/select_slices_2d.py` | Seeded case selection and slice ranking using 2D reads |
 | `scripts/run_segmentation.py` | Baseline experiments and parameter sweeps |
@@ -294,10 +316,13 @@ denoised images, without enhancement or cropping.
 | `scripts/explore_dataset.py` | Volume inventory and context figures |
 | `scripts/select_cases.py` | Volume-stratified case and slice selection |
 | `scripts/preprocess_selected.py` | Selected-slice preprocessing figures |
-| `Run_TPI.bat` | Windows environment setup/checks and Python workflow launch |
-| `Run_TPI_GUI.bat` | Windows environment setup/checks and graphical launcher |
+| `PSIB.bat` | Windows environment setup, dependency checks, and GUI launcher |
+| `scripts/build_icons.py` | Deterministic icon asset builder from the supplied master |
+| `scripts/create_shortcut.ps1` | Local minimized Windows shortcuts for Desktop and project root |
+| `scripts/psib.desktop.template` | Optional Linux desktop entry template |
 | `scripts/gui.py` | Desktop interface for the 2D baseline workflow |
 | `tests/test_gui_model.py` | No-display tests for sidebar transitions and persistence |
+| `tests/test_app_icon.py` | No-display tests for icon generation, paths and fallback |
 | `tests/` | Synthetic `unittest` coverage |
 
 Arrays use canonical RAS `(X, Y, Z)` order; axial slices are `array[:, :, k]`
