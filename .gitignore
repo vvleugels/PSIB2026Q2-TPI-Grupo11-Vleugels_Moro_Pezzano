@@ -4,5 +4,6 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 config.local.yaml
+.psib_gui/
 results/
 data/*

@@ -52,7 +52,7 @@ El **objetivo máximo** agrega un análisis morfológico descriptivo en 3D de la
 máscaras de referencia de los casos seleccionados: volumen tumoral en cm³,
 número de componentes tumorales 6-conexos, volumen y dimensiones del
 paralelepípedo alineado con los ejes de cada componente, y una visualización de
-superficie 3D por caso. Se inicia desde la pestaña **Morfología 3D** del GUI o
+superficie 3D por caso. Se inicia desde la sección **Cuantificación** del GUI o
 con `python scripts/analyze_morphology_3d.py`, después de generar
 `results/selected_cases_slices.csv`. Los CSV y las figuras se guardan en
 `results/morphology_3d/`. Usa el espaciado físico del NIfTI y el orden canónico
@@ -82,6 +82,9 @@ mantienen en 2D sobre los cortes seleccionados.
 | `scripts/explore_dataset.py` | Inventario volumétrico y figuras de contexto |
 | `src/psib/morphology3d.py` | Medidas físicas de componentes tumorales 3D |
 | `scripts/analyze_morphology_3d.py` | CSV y superficies 3D de los casos seleccionados |
+| `src/psib/gui_model.py` | Estado de sidebar y persistencia del perfil, sin dependencias Tk |
+| `scripts/gui.py` | GUI con sidebar seccionado, visor compartido y ejecución en segundo plano |
+| `tests/test_gui_model.py` | Estado, expansión, persistencia y clamp de ancho del sidebar |
 | `scripts/select_cases.py` | Selección por terciles de volumen tumoral |
 | `scripts/preprocess_selected.py` | Figuras de ventana, filtrado y recorte |
 | `Run_TPI.bat` | Preparación del entorno Windows y llamada al lanzador Python |
@@ -133,15 +136,18 @@ termina con un error. No modifica los archivos YAML del usuario.
 Instalar Python 3.12 de 64 bits con el lanzador `py` para crear el entorno.
 La ejecución nativa del archivo BAT no se ha verificado desde el entorno Linux.
 
-Para usar una interfaz gráfica, ejecutar `Run_TPI_GUI.bat`. Este lanzador
-prepara el mismo entorno virtual y abre `scripts/gui.py`, que permite elegir un
-YAML, iniciar el flujo 2D, seguir la salida del proceso y abrir la carpeta de
-resultados. Al terminar, muestra las figuras PNG generadas para la corrida en
-un visor con navegación anterior/siguiente, ajuste a ventana, zoom y paneo.
-También carga las figuras de la última corrida completada al abrir la app. El
-procesamiento corre en un hilo separado para que la ventana siga respondiendo.
-La pestaña de actividad muestra un resumen de la última corrida al iniciar y
-la salida en vivo mientras se ejecuta una nueva.
+Para usar la interfaz gráfica, ejecutar `Run_TPI_GUI.bat`. La ventana ofrece
+cinco secciones desplazables en una sidebar izquierda que se puede contraer con
+el chevron o `Ctrl+B`; el visor ocupa el área derecha. La sección **Caso** carga
+un caso y permite recorrer cortes, **Preprocesamiento** y **Segmentación**
+actualizan el corte visible, **Cuantificación** ejecuta el análisis 3D de
+referencia y **Resultados** lista figuras/CSV junto con sus explicaciones y el
+registro. El pie fijo mantiene visibles los pasos, el progreso, Cancelar y la
+acción principal. En la rail contraída, cada icono abre directamente su sección.
+La barra de estado inferior presenta coordenadas y HU. El perfil se conserva en
+`.psib_gui/`, ignorado por Git. El pipeline y la morfología corren en segundo
+plano; los controles visibles se guardan en un YAML local ignorado por Git para
+que el pipeline use la misma configuración.
 
 La selección 2D y la segmentación base comparten la configuración resuelta.
 El identificador usa la hora local con formato `YYYYMMDD-HHMMSS`; las salidas
@@ -636,7 +642,6 @@ locales. Queda completar y analizar el barrido; la validación independiente en
 otra base se considera trabajo posterior y queda fuera de los resultados
 actuales.
 
-
 ## 14. Ejecutor de segmentación y barrido
 
 Desde la raíz, usando exclusivamente procesamiento 2D:
@@ -869,3 +874,65 @@ significancia ni afirmación de separación generalizable.
 
 El comando acepta `--config ruta/a/config.yaml`. Usa el `data_dir` configurado
 sin aplicar el fallback del lanzador; corregir esa ruta si fue necesario el fallback.
+
+## Interfaz GUI: distribución y controles
+
+La interfaz Tkinter vive en `scripts/gui.py`; el estado de navegación de la
+barra lateral y su persistencia se implementan sin Tk en `src/psib/gui_model.py`.
+El ancho inicial es 340 px, el ancho expandido se limita a 300 px como mínimo
+y al 45% del ancho de ventana como máximo. La ventana mínima es 1000 × 640.
+
+```text
+Ventana
+├── Barra lateral izquierda (PANEL)
+│   ├── Encabezado PSIB · TPI + chevron
+│   ├── Navegación: Caso | Preprocesamiento | Segmentación | Cuantificación | Resultados
+│   ├── Una sección visible; cada sección tiene su propio canvas vertical
+│   └── Pie fijo: pasos, progreso, Cancelar y Ejecutar flujo 2D (acción principal)
+├── Visor derecho (VIEW)
+│   ├── Anterior/siguiente, zoom −/+, Ajustar, 100% y modo Overlay/Antes/Después
+│   └── Canvas de imagen con desplazamiento por arrastre
+└── Estado inferior a lo ancho: coordenadas de píxel, HU y estado del proceso
+```
+
+La sección **Caso** ofrece el selector de casos incluidos en
+`selected_cases_slices.csv` (o todos los casos pareados antes de generar esa
+selección), un selector de volumen LiTS, metadatos del caso, navegación axial y
+saltos a cortes seleccionados. **Preprocesamiento** edita ventana HU, filtro,
+parámetro, ecualización y recorte visual. **Segmentación** permite ajustar
+umbralización, morfología, área mínima y overlays; al segmentar el corte actual
+muestra Dice, IoU, área y componentes 2D en una tabla compacta. **Cuantificación**
+ejecuta el análisis 3D existente sobre máscaras de referencia. **Resultados**
+muestra las imágenes y CSV disponibles, su explicación (si existe una entrada
+en `figure_notes.yaml`) y el registro del flujo.
+
+La tabla 3D muestra volumen total, componentes y la diagonal de la caja alineada
+con los ejes para la mayor lesión como aproximación dimensional; no es un
+diámetro máximo exacto. El análisis exporta las extensiones por eje y medidas
+completas en CSV.
+
+Colapsar con el chevron o `Ctrl+B` cambia a una barra de iconos de 44 px. Los
+iconos conservan la sección activa y al pulsar otro se expande esa sección. Los
+widgets no se reconstruyen, por lo que se mantienen sus valores y posiciones de
+scroll. El cambio vuelve a ajustar automáticamente el visor en modo Fit; en
+zoom manual conserva el punto aproximado que estaba centrado. Las tareas se
+ejecutan en segundo plano y muestran un indicador en la barra cuando está
+colapsada. `ProfileStore` guarda `collapsed`, `active_section` y `width` en
+`.psib_gui/profile.json`, ignorado por Git.
+
+| Zona | Widgets principales | Acción |
+| --- | --- | --- |
+| Encabezado | nombre, chevron | Alternar sidebar; `Ctrl+B` hace lo mismo |
+| Navegación | cinco botones / iconos del rail | Cambiar sección conservando su estado |
+| Caso | selector, archivo, slider, spinbox | Cargar caso y navegar cortes |
+| Preprocesamiento | entradas, combos, checkbox | Aplicar parámetros al corte visible |
+| Segmentación | parámetros, toggles, Treeview | Segmentar corte y revisar métricas por lesión |
+| Cuantificación | botón ejecutar/cancelar, Treeview | Procesar morfología de referencia en 3D |
+| Resultados | Treeview, nota, abrir carpeta, log | Mostrar figura o vista previa de CSV en el visor |
+| Visor | canvas, toolbar, navegación | Ver casos y resultados; zoom y paneo |
+
+La GUI no implementa una predicción de segmentación 3D ni métricas automáticas
+versus referencia 3D. El panel 3D presenta la morfología calculada desde las
+etiquetas de referencia. Los controles de segmento actual son una vista previa;
+el botón de ejecución usa los parámetros visibles y genera los resultados 2D
+reproducibles del pipeline.

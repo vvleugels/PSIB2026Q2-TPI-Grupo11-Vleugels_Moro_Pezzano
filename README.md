@@ -88,23 +88,28 @@ repository root, run:
 ```
 
 The launcher creates `.venv` if needed, installs/checks the dependencies, and
-opens the GUI. It lets you
-choose a YAML configuration, run the same 2D baseline workflow, follow its log,
-and review the generated prediction figures in the app. The figure viewer has
-previous/next navigation, fit-to-window, zoom, and pan controls. It opens the
-latest completed run for the selected output directory when available. Its
-activity tab shows the latest run summary on startup and live output while a
-new run is processing. The launcher uses the existing `.venv` and checks
-dependencies before opening the interface.
+opens the GUI. A collapsible left sidebar holds five scrollable sections:
+**Caso**, **Preprocesamiento**, **Segmentación**, **Cuantificación**, and
+**Resultados**. The right side stays dedicated to the image viewer. Collapse the
+sidebar with its chevron or **Ctrl+B**; in the narrow rail, click a section icon
+to reopen directly there. Sidebar width, collapsed state, and active section are
+saved under the ignored `.psib_gui/` profile folder.
 
-The **Morfología 3D** tab analyzes the selected cases' reference tumor masks
-separately from 2D segmentation. Run the 2D workflow first to create
-`results/selected_cases_slices.csv`, then click **Analizar morfología 3D**.
-The GUI shows tumor volume, 6-connected component count, largest-component
-volume and its axis-aligned dimensions, with a 3D surface figure per case.
-Detailed component measurements and figures are saved in
-`results/morphology_3d/`. This is descriptive morphology of reference labels;
-it does not generate a 3D segmentation prediction.
+Choose a selected case, inspect its volume information, move through axial
+slices, or jump to the slice with the largest tumor area. The preprocessing and
+segmentation controls update a current-slice preview; **Ejecutar flujo 2D** runs
+the reproducible batch workflow with the current settings. The pinned footer
+keeps the checklist, progress, cancel, and main run action visible. Results
+figures and CSV tables appear in the **Resultados** list and use the same viewer.
+The viewer supports previous/next, fit, 100%, zoom, pan, and overlay / before /
+after display. Pixel coordinates and HU values appear in the bottom status bar.
+
+The **Cuantificación** section runs the available 3D analysis on reference
+masks, showing physical tumor volume, 6-connected component count, and the
+largest component's bounding-box diagonal. Automatic 3D segmentation and
+automatic-versus-reference 3D error are not implemented; this task describes
+the reference masks only. The log is available at the bottom of the
+**Resultados** section.
 
 ## Data and configuration
 
@@ -143,7 +148,7 @@ Segmentation variants are compared with Dice and IoU against reference masks;
 The **maximum objective** adds descriptive 3D morphology from the reference
 masks of the selected cases: physical tumor volume, number of 6-connected
 components, per-component volume and axis-aligned dimensions, plus a 3D surface
-view. This is available from the GUI's **Morfología 3D** tab or by running
+view. This is available from the GUI's **Cuantificación** section or by running
 `python scripts/analyze_morphology_3d.py`. It does not extend the prediction
 pipeline to 3D. The detailed segmentation, features, and evaluation remain 2D.
 
@@ -279,6 +284,7 @@ denoised images, without enhancement or cropping.
 | `src/psib/metrics.py` | Dice and IoU |
 | `src/psib/features.py` | 2D lesion geometry and masked GLCM texture |
 | `src/psib/visualization.py` | Prediction/reference contour overlays |
+| `src/psib/gui_model.py` | Display-independent sidebar state and profile persistence |
 | `scripts/run_tpi.py` | Automatic selection and timestamped baseline run |
 | `scripts/select_slices_2d.py` | Seeded case selection and slice ranking using 2D reads |
 | `scripts/run_segmentation.py` | Baseline experiments and parameter sweeps |
@@ -291,6 +297,7 @@ denoised images, without enhancement or cropping.
 | `Run_TPI.bat` | Windows environment setup/checks and Python workflow launch |
 | `Run_TPI_GUI.bat` | Windows environment setup/checks and graphical launcher |
 | `scripts/gui.py` | Desktop interface for the 2D baseline workflow |
+| `tests/test_gui_model.py` | No-display tests for sidebar transitions and persistence |
 | `tests/` | Synthetic `unittest` coverage |
 
 Arrays use canonical RAS `(X, Y, Z)` order; axial slices are `array[:, :, k]`
