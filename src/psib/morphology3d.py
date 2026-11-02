@@ -63,6 +63,25 @@ def tumor_components_3d(segmentation: np.ndarray, spacing_mm: tuple[float, float
     return records, (labels, bounds, objects)
 
 
+def remove_small_components_3d(mask: np.ndarray, min_voxels: int = 8) -> np.ndarray:
+    """Remove 6-connected foreground components smaller than ``min_voxels``."""
+    mask = np.asarray(mask)
+    if mask.ndim != 3 or mask.dtype.kind not in "buif" or not np.isfinite(mask).all() \
+            or not np.isin(mask, (0, 1)).all():
+        raise ValueError("mask debe ser un volumen 3D binario y finito.")
+    if (isinstance(min_voxels, (bool, np.bool_)) or not isinstance(min_voxels, (int, np.integer))
+            or min_voxels < 1):
+        raise ValueError("min_voxels debe ser un entero positivo.")
+    labels, count = ndimage.label(mask.astype(bool, copy=False),
+                                  structure=ndimage.generate_binary_structure(3, 1))
+    if count == 0:
+        return np.zeros(mask.shape, dtype=bool)
+    sizes = np.bincount(labels.ravel(), minlength=count + 1)
+    keep = sizes >= int(min_voxels)
+    keep[0] = False
+    return keep[labels]
+
+
 def _maximum_pair_distance(points: np.ndarray) -> float:
     """Maximum Euclidean distance between convex-hull vertices (mm)."""
     if len(points) < 2:

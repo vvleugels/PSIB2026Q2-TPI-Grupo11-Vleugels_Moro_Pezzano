@@ -24,6 +24,7 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 | Volumen, burden, componentes y diámetros 3D desde máscaras de referencia | Implementados en la exploración volumétrica opcional |
 | Análisis morfológico 3D de los casos seleccionados, exportación de medidas por lesión y superficies | Implementado como flujo opcional invocable desde el GUI |
 | Evaluación por lesión, errores geométricos y detección por tamaño en cortes 2D | Implementada como flujo posterior a la segmentación |
+| Estimación automática 3D por apilado de predicciones axiales | Implementada como análisis opcional de volúmenes completos |
 | Concordancia Bland–Altman y comparación estadística por caso | Implementadas como análisis posteriores |
 | Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Implementado |
 | Barrido de 252 configuraciones y comparación exploratoria | Implementado |
@@ -40,14 +41,17 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 El flujo principal usa lectura por cortes 2D para limitar el consumo de memoria.
 El inventario exploratorio calcula volumen tumoral y componentes desde las
 máscaras de referencia. El flujo morfológico opcional descrito a continuación
-agrega medidas por componente y figuras de superficie, sin generar una
-predicción tumoral 3D.
+agrega medidas por componente y figuras de superficie sobre la referencia. La
+estimación automática 3D opcional se describe en la sección 6; apila
+predicciones del segmentador 2D y no es una segmentación 3D aprendida.
 
 ### Alcance mínimo y máximo
 
 El **objetivo mínimo** es segmentar y cuantificar en 2D los tumores de los
-cortes axiales seleccionados en los 10 casos etiquetados del subconjunto local.
-La configuración actual solicita 5 cortes por caso (hasta 50 en total) y
+cortes axiales seleccionados en los casos etiquetados del subconjunto local.
+El objetivo final comprende 10 casos; la configuración actual toma 1 caso para
+probar el flujo rápidamente. Restaurar `selection.n_cases: 10` antes de
+producir los resultados comparativos finales. Se solicitan 5 cortes por caso y
 separa los índices por un mínimo de 2 cortes; si esa separación lo impide,
 puede seleccionar menos. En esos cortes se calculan características
 geométricas y textura GLCM 2D. La segmentación compara umbrales globales, Otsu
@@ -60,8 +64,10 @@ Feret axial y 3D, diámetro esférico equivalente y diagonal de caja por lesión
 El diámetro máximo informado es el Feret axial máximo (tipo RECIST); Feret 3D
 queda como medida secundaria y la diagonal de caja se conserva con nombre
 explícito porque sobreestima el diámetro. El GUI muestra Feret axial. La
-segmentación automática, la evaluación por lesión, la textura y la comparación
-de métodos siguen siendo 2D sobre cortes seleccionados.
+Como extensión opcional, el segmentador 2D se aplica a todos los cortes de cada
+volumen seleccionado y se apila para una estimación automática 3D. La evaluación
+por lesión, la textura y la comparación estadística siguen siendo 2D sobre
+cortes seleccionados.
 
 ## 2. Estructura y responsabilidades
 
@@ -85,6 +91,7 @@ de métodos siguen siendo 2D sobre cortes seleccionados.
 | `scripts/select_slices_2d.py` | Selección con lectura de máscaras por planos |
 | `scripts/run_segmentation.py` | Ejecuciones base y barrido de parámetros |
 | `scripts/evaluate_lesions.py` | Evaluación de detección y geometría vs. referencia |
+| `scripts/evaluate_morphology_3d.py` | Estimación 3D apilando predicciones axiales de la segmentación 2D |
 | `scripts/analyze_agreement.py` | Bland–Altman y correlaciones de medidas emparejadas |
 | `scripts/compare_methods.py` | Wilcoxon por caso y corrección Holm |
 | `scripts/run_compression.py` | Comparación de compresión y segmentación por corte |
@@ -254,7 +261,7 @@ Valores del YAML base:
 | `data_dir` | `data/Selected_database` | Pares de entrada |
 | `output_dir` | `results` | Salidas |
 | `selection.candidate_pool_size` | 15 | Máximo de candidatos muestreados |
-| `selection.n_cases` | 10 | Casos finales |
+| `selection.n_cases` | 1 | Casos seleccionados; reducido temporalmente para una prueba rápida |
 | `selection.slices_per_case` | 5 | Cortes solicitados por caso; el script admite 3 a 5 |
 | `selection.slice_strategy` | `stratified` | Roles tumorales o `area_top` legado |
 | `selection.minimum_slice_gap_mm` | 10 | Separación física entre cortes estratificados |
@@ -264,6 +271,7 @@ Valores del YAML base:
 | `dataset_context.density_tolerance_hu` | 5 | Diferencia absoluta considerada isodensa |
 | `features.glcm_levels` | 16 | Niveles de cuantización GLCM; 32 producía matrices ralas en ROIs chicas |
 | `lesion_eval.min_iou` | 0.0 | IoU mínimo entre componentes para aceptar correspondencia; 0 exige intersección |
+| `morphology3d_prediction.min_component_voxels` | 8 | Tamaño mínimo de componente 3D de predicción que se conserva |
 | `compression.qualities` | `[95, 75, 50, 25, 10]` | Calidades JPEG simuladas/medidas |
 | `reconstruction.cases` | `3` | Primeros tres casos seleccionados; admite lista explícita de IDs |
 | `reconstruction.slices_per_case` | 3 | Roles por caso: máximo, pequeño y libre de tumor |
@@ -726,6 +734,7 @@ python -m pip check
 | `test_slice_io.py` | Lectura por planos, orientación, rango de etiquetas y selección 2D |
 | `test_features.py` | Geometría 2D, espaciado físico y GLCM enmascarada |
 | `test_morphology3d.py` | Medidas físicas de componentes y diámetros 3D |
+| `test_morphology3d_prediction.py` | Limpieza de componentes y apilado volumétrico sintético |
 | `test_lesion_eval.py` | Correspondencia por lesión, divisiones, fusiones y tamaños |
 | `test_agreement.py` | Bland–Altman, Wilcoxon exacto y ajuste Holm |
 
@@ -1095,6 +1104,50 @@ El CSV por caso informa volumen hepático (`seg > 0`) y carga tumoral (volumen
 tumoral / volumen hepático). La GUI muestra Feret axial para la mayor lesión;
 el CSV conserva diagonal de caja como otra medida. Es cuantificación de las
 máscaras de referencia, no segmentación automática 3D.
+
+### Estimación 3D apilando predicciones 2D
+
+Este flujo opcional extiende una corrida 2D completada: aplica a cada corte
+axial de todos los casos seleccionados la configuración con mejor Dice medio
+por caso (o una configuración indicada), apila las predicciones, elimina
+componentes 6-conectados menores que el umbral configurado y las compara con
+las etiquetas tumorales de referencia. La región de búsqueda continúa usando
+`seg > 0` como máscara hepática de referencia, igual que el flujo 2D; por eso
+esta medida no equivale a segmentar automáticamente hígado y tumor sin ayuda.
+
+Ejecutar desde la raíz del repositorio después de una corrida terminada:
+
+```bash
+python scripts/evaluate_morphology_3d.py --run-id <run-id>
+python scripts/evaluate_morphology_3d.py --run-id <run-id> --configuration-id cfg_000
+```
+
+El default elimina componentes con menos de
+`morphology3d_prediction.min_component_voxels` (8 vóxeles); `--min-component-voxels`
+permite cambiarlo. Se leen todos los cortes completos de cada caso incluido en
+la selección copiada a la corrida. El volumen se procesa de a un corte, pero
+las máscaras 3D y el análisis de componentes requieren memoria adicional. El
+tiempo puede ser considerable, en especial en NIfTI comprimidos. La salida se
+crea en `<run>/morphology3d_prediction/` y nunca reemplaza una salida anterior.
+
+| Archivo | Contenido |
+| --- | --- |
+| `morphology_3d_prediction_per_case.csv` | Volúmenes, Dice/IoU 3D, conteo de componentes y error de Feret axial por caso |
+| `morphology_3d_prediction_per_lesion.csv` | Medidas geométricas de lesiones de referencia, predicción cruda y predicción filtrada |
+| `comparison_3d.png` | Dispersión de volumen y Feret axial predichos frente a referencia |
+| `case_NNN_masks_3d.npz` | Máscara de referencia, predicción cruda y predicción limpia del caso |
+| `run.json` | Estado, configuración elegida y umbral de filtrado |
+
+El caso mide Feret axial como el mayor diámetro de cualquier componente en
+cualquier corte; el volumen usa el espaciado físico NIfTI. Dice e IoU se
+calculan entre volúmenes binarios completos. El filtrado puede quitar falsos
+positivos, pero también lesiones pequeñas; comparar `prediction_raw` y
+`prediction_clean` para interpretar el efecto del umbral. Este apilado no añade
+continuidad 3D al clasificador ni sustituye la validación independiente.
+En la corrida base probada, el Dice 3D limpio medio fue 0.161 y varios casos
+mostraron fuerte sobreestimación. El flujo funciona, pero antes de interpretar
+la estimación 3D como resultado del TPI hay que mejorar y validar el
+segmentador 2D.
 
 ## Interfaz GUI: distribución y controles
 

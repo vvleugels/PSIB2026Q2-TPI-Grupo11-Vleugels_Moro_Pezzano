@@ -3,7 +3,7 @@ output_dir: results
 
 selection:
   candidate_pool_size: 15
-  n_cases: 10
+  n_cases: 1
   slices_per_case: 5
   slice_strategy: stratified
   minimum_slice_gap_mm: 10
@@ -20,6 +20,9 @@ features:
 
 lesion_eval:
   min_iou: 0.0
+
+morphology3d_prediction:
+  min_component_voxels: 8
 
 compression:
   qualities: [95, 75, 50, 25, 10]

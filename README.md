@@ -8,7 +8,8 @@ Dice/IoU evaluation. Reusable code lives in `src/psib/`; runnable workflows live
 in `scripts/`. All workflows use Python scripts. Feature extraction includes
 2D geometry and masked GLCM texture descriptors. The optional volumetric
 inventory summarizes 3D tumor volume and connected-component count from the
-reference masks; the segmentation pipeline itself remains 2D.
+reference masks. The primary segmentation workflow remains 2D, with an optional
+full-volume estimate created by stacking those same axial predictions.
 
 See [documentation.md](documentation.md) for the detailed Spanish guide,
 API contracts, output schemas, and experimental limitations.
@@ -20,6 +21,7 @@ API contracts, output schemas, and experimental limitations.
 | Classical segmentation | 2D axial slices, known liver region, no ML | Dice/IoU tables and prediction figures |
 | Lesion-level evaluation | 2D components, split/merge-aware matches, physical area and Feret diameter | `lesion_eval/` tables and recall plot |
 | Agreement and method statistics | Bland–Altman, Pearson/Spearman, paired Wilcoxon and Holm | Agreement plots and comparison CSVs |
+| Stacked 3D prediction estimate | 2D segmenter applied to every axial slice, 6-connected cleanup | 3D volume, Dice/IoU and Feret comparison per case |
 | GLCM texture | Contrast, homogeneity, energy, correlation, entropy and ASM | Feature tables, plots and level sensitivity |
 | Compression comparison | 8-bit control, PNG/Huffman/RLE and JPEG-like DCT | `results/compression/<run-id>/` |
 | Reconstruction comparison | Simulated acquisition of already reconstructed CT slices | `results/reconstruction/<run-id>/` |
@@ -173,7 +175,7 @@ ranking; that mode retains index-based `minimum_slice_gap`.
 
 | Setting | Default | Meaning |
 | --- | ---: | --- |
-| `selection.n_cases` | 10 | Cases sampled for 2D selection |
+| `selection.n_cases` | 1 | Cases sampled for 2D selection; temporarily reduced for a quick end-to-end check |
 | `selection.slices_per_case` | 5 | Requested slices per case; 3–5 supported |
 | `selection.slice_strategy` | `stratified` | Role-based strategy or legacy `area_top` |
 | `selection.minimum_slice_gap_mm` | 10 | Minimum physical separation for stratified slices |
@@ -182,6 +184,7 @@ ranking; that mode retains index-based `minimum_slice_gap`.
 | `dataset_context.density_tolerance_hu` | 5 | Absolute HU difference treated as isodense |
 | `features.glcm_levels` | 16 | GLCM quantization levels; 32 was sparse on small ROIs |
 | `lesion_eval.min_iou` | 0 | Minimum component IoU accepted as a lesion correspondence |
+| `morphology3d_prediction.min_component_voxels` | 8 | Minimum 6-connected 3D prediction component size |
 | `compression.qualities` | `[95,75,50,25,10]` | JPEG-like quantization qualities |
 | `reconstruction.angles` | `[180,60,20]` | Simulated projection counts |
 | `reconstruction.downsample` | 1 | Optional integer speedup factor |
@@ -199,8 +202,10 @@ not an independent full-volume evaluation.
 ## Scope based on the instructor's feedback
 
 The **minimum objective** is to segment and quantify tumors in 2D on axial
-slices from the configured 10 labeled cases. The current configuration requests
-up to 5 slices per case (up to 50 total), with a minimum gap between slices.
+slices from the configured labeled cases. The final project target is 10 cases;
+the current configuration temporarily selects 1 case for a quick end-to-end
+check. Restore `selection.n_cases: 10` before producing final comparative
+results. It requests up to 5 slices per case, with a minimum gap between slices.
 Segmentation variants are compared with Dice and IoU against reference masks;
 2D geometric and GLCM features describe the selected regions. Lesion-level
 evaluation adds split/merge-aware detection counts and automatic-versus-reference
@@ -213,8 +218,11 @@ per-component 3D and maximum axial Feret diameters, equivalent-sphere diameter,
 and an explicitly named bounding-box diagonal. The reported maximum diameter
 is the largest axial Feret diameter; 3D Feret is secondary, and the bounding-box
 diagonal is retained as a separate measurement because it overestimates
-diameter. It does not extend prediction to 3D. Lesion evaluation, statistics,
-and texture remain 2D.
+diameter. The optional maximum extension also stacks the 2D segmenter across
+every slice in each selected volume, removes small 3D components, and compares
+predicted volume and maximum axial Feret with the reference. It is exploratory:
+it retains the 2D method and reference liver region, so it is not an independent
+validation. Lesion evaluation, statistics, and texture remain 2D.
 
 The selected slices are chosen using reference masks, and the same cases are
 used for the exploratory comparison. Dice/IoU and feature summaries therefore
@@ -381,6 +389,25 @@ exact two-sided Wilcoxon tests; repeated `--compare A,B` pairs receive Holm
 adjustment. Cases, not slices, are the comparison units; results with fewer than
 six paired cases are flagged as low power.
 
+The optional full-volume estimate processes every axial slice in each case
+listed in the completed run and may take substantially longer than the
+selected-slice workflow:
+
+```bash
+python scripts/evaluate_morphology_3d.py --run-id <run-id>
+```
+
+By default it uses the configuration with the best mean per-case Dice from
+that run and removes 6-connected components smaller than
+`morphology3d_prediction.min_component_voxels` (8 voxels). It writes per-case
+and per-lesion CSVs (`morphology_3d_prediction_per_case.csv` and
+`morphology_3d_prediction_per_lesion.csv`), `comparison_3d.png`, and compressed
+reference/raw/clean masks in a new `morphology3d_prediction/` folder. Existing
+output folders are preserved; use `--configuration-id cfg_000` to choose a
+specific configuration. The baseline run completed, but its mean 3D Dice was
+0.161; the current 2D threshold segmenter needs improvement before these
+estimates can support strong conclusions.
+
 ## Optional volumetric exploration
 
 For a machine with enough memory to load full volumes and count 3D components:
@@ -427,6 +454,7 @@ denoised images, without enhancement or cropping.
 | `scripts/select_slices_2d.py` | Seeded case selection and slice ranking using 2D reads |
 | `scripts/run_segmentation.py` | Baseline experiments and parameter sweeps |
 | `scripts/evaluate_lesions.py` | Per-lesion detection metrics for a completed run |
+| `scripts/evaluate_morphology_3d.py` | Full-volume estimate by stacking the 2D segmenter |
 | `scripts/analyze_agreement.py` | Bland–Altman and correlation summaries |
 | `scripts/compare_methods.py` | Paired per-case Wilcoxon comparisons with Holm correction |
 | `scripts/extract_features.py` | Per-region texture, summary, and tumor geometry tables |
