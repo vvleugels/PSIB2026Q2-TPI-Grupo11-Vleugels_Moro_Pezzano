@@ -31,7 +31,7 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 | Experimento de compresión reversible e irreversible | Implementado sobre cortes seleccionados |
 | Simulación de adquisición y reconstrucción tomográfica | Implementada; no es adquisición clínica real |
 | Lanzador con fallback de datos e identificadores temporales | Implementado |
-| Interfaz gráfica para iniciar el flujo 2D y revisar su registro | Implementada como lanzador de escritorio |
+| Interfaz gráfica para ejecutar selección 2D, segmentación, análisis 3D, compresión y reconstrucción | Implementada como lanzador de escritorio |
 | Superposición de contornos de predicción y referencia | Disponible como API Python |
 | Evaluación independiente con otra base | Pendiente |
 
@@ -103,7 +103,7 @@ mantienen en 2D sobre los cortes seleccionados.
 | `scripts/preprocess_selected.py` | Figuras de ventana, filtrado y recorte |
 | `PSIB.bat` | Preparación del entorno Windows, comprobación de dependencias y apertura del GUI |
 | `scripts/check_requirements.py` | Comprueba las dependencias directas antes de iniciar el GUI |
-| `scripts/gui.py` | Interfaz de escritorio para el flujo 2D y el análisis morfológico 3D opcional |
+| `scripts/gui.py` | Interfaz de escritorio para el flujo 2D, selección, análisis morfológico 3D, compresión y reconstrucción |
 | `tests/` | Tests sintéticos con `unittest` |
 | `data/` | Datos locales, ignorados por Git |
 | `results/` | Tablas y figuras generadas, ignoradas por Git |
@@ -1043,7 +1043,15 @@ saltos a cortes seleccionados. **Preprocesamiento** edita ventana HU, filtro,
 parámetro, ecualización y recorte visual. **Segmentación** permite ajustar
 umbralización, morfología, área mínima y overlays; al segmentar el corte actual
 muestra Dice, IoU, área y componentes 2D en una tabla compacta. **Cuantificación**
-ejecuta el análisis 3D existente sobre máscaras de referencia. **Resultados**
+ejecuta el análisis 3D existente sobre máscaras de referencia y permite iniciar
+los experimentos de compresión y reconstrucción simulada. En **Caso**, el botón
+**Generar selección de cortes 2D** crea `selected_cases_slices.csv` con la
+configuración actual; esa selección es requisito para los dos experimentos. Si
+falta, la GUI lo informa y permite generarla desde esa sección o ejecutar el
+flujo 2D. Cada experimento guarda sus salidas en una carpeta con identificador
+temporal bajo `results/compression/` o `results/reconstruction/`. La salida en
+vivo y la cancelación se gestionan desde la interfaz; las figuras y tablas
+exportadas se cargan en el visor compartido. **Resultados**
 muestra las imágenes y CSV disponibles, su explicación (si existe una entrada
 en `figure_notes.yaml`) y el registro del flujo.
 

@@ -114,6 +114,14 @@ figures and CSV tables appear in the **Resultados** list and use the same viewer
 The viewer supports previous/next, fit, 100%, zoom, pan, and overlay / before /
 after display. Pixel coordinates and HU values appear in the bottom status bar.
 
+The GUI can also prepare `selected_cases_slices.csv` from **Caso → Generar
+selección de cortes 2D**, then launch the compression experiment and simulated
+reconstruction from **Cuantificación**. Those two experiments require that
+selection file; the GUI explains how to create it if it is missing. Their live
+logs, cancellation, figures, and tables are handled in the same interface.
+Each experiment writes to a separate timestamped directory under
+`results/compression/` or `results/reconstruction/`.
+
 The **Cuantificación** section runs the available 3D analysis on reference
 masks, showing physical tumor volume, 6-connected component count, and the
 largest component's bounding-box diagonal. Automatic 3D segmentation and

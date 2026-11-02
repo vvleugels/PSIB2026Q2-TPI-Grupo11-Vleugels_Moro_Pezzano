@@ -12,6 +12,7 @@ import ctypes
 import subprocess
 import sys
 import threading
+from datetime import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import yaml
@@ -68,6 +69,8 @@ class TpiLauncher:
                                warning_callback=self.queue_icon_warning)
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.process: subprocess.Popen[str] | None = None
+        self.task_running = False
+        self.task_buttons: list[ttk.Button] = []
         self.cancel_requested = False
         self.results_dir: Path | None = None
         self.figures: list[Path] = []
@@ -252,6 +255,9 @@ class TpiLauncher:
                    command=self.jump_largest_tumor).pack(fill="x", pady=(7, 3))
         ttk.Button(parent, text="Siguiente corte seleccionado", style="Secondary.TButton",
                    command=self.next_selected_slice).pack(fill="x")
+        self.selection_button = ttk.Button(parent, text="Generar selección de cortes 2D",
+                                           style="Secondary.TButton", command=self.run_slice_selection)
+        self.selection_button.pack(fill="x", pady=(8, 3))
 
     def build_preprocessing_section(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Preprocesamiento", style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 8))
@@ -331,6 +337,14 @@ class TpiLauncher:
                                             command=self.run_morphology)
         self.morphology_button.pack(side="left", fill="x", expand=True)
         ttk.Button(controls, text="Cancelar", style="Secondary.TButton", command=self.cancel_run).pack(side="left", padx=(5, 0))
+        self.compression_button = ttk.Button(parent, text="Ejecutar experimento de compresión",
+                                             style="Secondary.TButton", command=self.run_compression)
+        self.compression_button.pack(fill="x", pady=(4, 2))
+        self.reconstruction_button = ttk.Button(parent, text="Ejecutar reconstrucción simulada",
+                                                style="Secondary.TButton", command=self.run_reconstruction)
+        self.reconstruction_button.pack(fill="x", pady=2)
+        self.task_buttons = [self.selection_button, self.morphology_button,
+                             self.compression_button, self.reconstruction_button]
         columns = ("case_id", "lesions", "volume", "diameter")
         self.morphology_table = ttk.Treeview(parent, columns=columns, show="headings", height=6)
         for key, title, width in (("case_id", "Caso", 50), ("lesions", "Lesiones", 60),
@@ -1102,7 +1116,7 @@ class TpiLauncher:
         self.log.configure(state="disabled")
 
     def run(self) -> None:
-        if self.process is not None:
+        if self.task_running or self.process is not None:
             return
         config = Path(self.config_path.get()).expanduser()
         if not config.is_file():
@@ -1115,8 +1129,10 @@ class TpiLauncher:
             return
         self.results_dir = None
         self.cancel_requested = False
+        self.task_running = True
         self.run_button.configure(state="disabled")
-        self.morphology_button.configure(state="disabled")
+        for button in self.task_buttons:
+            button.configure(state="disabled")
         self.cancel_button.configure(state="normal")
         self.log_meta.set("SALIDA EN VIVO")
         self.set_status("Ejecutando…", "running")
@@ -1130,7 +1146,7 @@ class TpiLauncher:
         self.root.after(100, self.poll_events)
 
     def run_morphology(self) -> None:
-        if self.process is not None:
+        if self.task_running or self.process is not None:
             return
         config = Path(self.config_path.get()).expanduser()
         if not config.is_file():
@@ -1142,8 +1158,10 @@ class TpiLauncher:
             messagebox.showerror("Configuración inválida", str(exc))
             return
         self.cancel_requested = False
+        self.task_running = True
         self.run_button.configure(state="disabled")
-        self.morphology_button.configure(state="disabled")
+        for button in self.task_buttons:
+            button.configure(state="disabled")
         self.cancel_button.configure(state="normal")
         self.log_meta.set("ANÁLISIS MORFOLÓGICO 3D")
         self.set_status("Analizando máscaras 3D…", "running")
@@ -1153,6 +1171,88 @@ class TpiLauncher:
         self.append_log(f"\n> Iniciando morfología 3D con {config.resolve()}")
         threading.Thread(target=self.morphology_worker, args=(config.resolve(),), daemon=True).start()
         self.root.after(100, self.poll_events)
+
+    def run_slice_selection(self) -> None:
+        """Generate the configured reproducible 2D slice selection from the GUI."""
+        self.start_cli_task("select_slices_2d.py", "Generando selección 2D…", "Caso",
+                            task="selection")
+
+    def run_compression(self) -> None:
+        """Run the compression experiment for the currently selected slice CSV."""
+        self.start_experiment("run_compression.py", "compression", "Experimento de compresión…")
+
+    def run_reconstruction(self) -> None:
+        """Run the simulated reconstruction experiment for selected slices."""
+        self.start_experiment("run_reconstruction.py", "reconstruction", "Reconstrucción simulada…")
+
+    def start_experiment(self, script: str, kind: str, label: str) -> None:
+        try:
+            cfg = load_config(self.config_path.get())
+            selection = Path(cfg["_output_dir"]) / "selected_cases_slices.csv"
+        except Exception as exc:
+            messagebox.showerror("Configuración inválida", str(exc))
+            return
+        if not selection.is_file():
+            messagebox.showinfo("Falta la selección de cortes",
+                                "Primero generá selected_cases_slices.csv con «Generar selección de cortes 2D» o ejecutá el flujo 2D.")
+            return
+        run_id = datetime.now().strftime("gui-%Y%m%d-%H%M%S-%f")
+        result_dir = Path(cfg["_output_dir"]) / kind / run_id
+        self.start_cli_task(script, label, "Cuantificación", task=kind,
+                            extra_args=("--run-id", run_id), result_dir=result_dir)
+
+    def start_cli_task(self, script: str, label: str, section: str, *, task: str,
+                       extra_args: tuple[str, ...] = (), result_dir: Path | None = None) -> None:
+        """Run one repository CLI workflow asynchronously and stream its output to the GUI."""
+        if self.task_running or self.process is not None:
+            return
+        source_config = Path(self.config_path.get()).expanduser()
+        if not source_config.is_file():
+            messagebox.showerror("Configuración no encontrada", f"No existe este archivo:\n{source_config}")
+            return
+        try:
+            config = self.write_effective_run_config()
+        except Exception as exc:
+            messagebox.showerror("Configuración inválida", str(exc))
+            return
+        self.cancel_requested = False
+        self.task_running = True
+        self.run_button.configure(state="disabled")
+        for button in self.task_buttons:
+            button.configure(state="disabled")
+        self.cancel_button.configure(state="normal")
+        self.log_meta.set(label.upper())
+        self.set_status(label, "running")
+        self.show_section(section)
+        self.progress.pack(fill="x", pady=(0, 5))
+        self.progress.start(12)
+        self.append_log(f"\n> Iniciando {label} con {config.resolve()}")
+        args = (sys.executable, str(ROOT / "scripts" / script), "--config", str(config.resolve()), *extra_args)
+        threading.Thread(target=self.cli_task_worker,
+                         args=(args, task, result_dir), daemon=True).start()
+        self.root.after(100, self.poll_events)
+
+    def cli_task_worker(self, args: tuple[str, ...], task: str,
+                        result_dir: Path | None) -> None:
+        try:
+            interpreter = Path(args[0])
+            if interpreter.name.lower() == "pythonw.exe":
+                console_python = interpreter.with_name("python.exe")
+                if console_python.is_file():
+                    args = (str(console_python), *args[1:])
+            environment = os.environ.copy()
+            environment["PYTHONIOENCODING"] = "utf-8"
+            self.process = subprocess.Popen(args, cwd=ROOT, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                bufsize=1, env=environment)
+            if self.cancel_requested:
+                self.process.terminate()
+            assert self.process.stdout is not None
+            for line in self.process.stdout:
+                self.events.put(("task_line", line.rstrip()))
+            self.events.put(("task_done", (task, result_dir, self.process.wait())))
+        except Exception as exc:
+            self.events.put(("task_error", (task, str(exc))))
 
     def morphology_worker(self, config: Path) -> None:
         try:
@@ -1219,6 +1319,35 @@ class TpiLauncher:
                 if line.startswith(RESULT_PREFIX):
                     result = line[len(RESULT_PREFIX):].removesuffix(".")
                     self.results_dir = Path(result)
+            elif kind == "task_line":
+                self.append_log(str(value))
+            elif kind == "task_error":
+                task, error = value
+                self.append_log(f"Error al iniciar {task}: {error}")
+                self.log_meta.set(f"ERROR AL INICIAR {str(task).upper()}")
+                self.set_status("Error al iniciar", "error")
+                finished = True
+            elif kind == "task_done":
+                task, result_dir, code = value
+                if int(code) == 0:
+                    if task == "selection":
+                        self.refresh_cases()
+                        self.log_meta.set("SELECCIÓN 2D LISTA")
+                        self.set_status("Selección de cortes lista", "success")
+                    elif result_dir and result_dir.is_dir():
+                        self.results_dir = result_dir
+                        self.refresh_results_list()
+                        count = self.load_run_figures(result_dir)
+                        self.log_meta.set(f"{str(task).upper()} FINALIZADO")
+                        description = f"{count} figuras" if count else "resultados guardados"
+                        self.set_status(f"{task.capitalize()} listo · {description}", "success")
+                        self.show_section("Resultados")
+                    else:
+                        self.set_status(f"{task.capitalize()} finalizado", "success")
+                else:
+                    self.log_meta.set(f"{str(task).upper()} CON ERROR")
+                    self.set_status(f"Finalizó con error ({code})", "error")
+                finished = True
             elif kind == "morph_line":
                 self.append_log(str(value))
             elif kind == "morph_error":
@@ -1268,9 +1397,12 @@ class TpiLauncher:
             self.progress.stop()
             self.progress.pack_forget()
             self.process = None
+            self.task_running = False
             self.cancel_requested = False
             self.run_button.configure(state="normal")
             self.morphology_button.configure(state="normal")
+            for button in self.task_buttons:
+                button.configure(state="normal")
             self.cancel_button.configure(state="disabled")
             self.rail_activity.configure(text="")
         else:
