@@ -348,7 +348,7 @@ class TpiLauncher:
         columns = ("case_id", "lesions", "volume", "diameter")
         self.morphology_table = ttk.Treeview(parent, columns=columns, show="headings", height=6)
         for key, title, width in (("case_id", "Caso", 50), ("lesions", "Lesiones", 60),
-                                  ("volume", "Vol. cm³", 75), ("diameter", "Diag. caja mm", 85)):
+                                  ("volume", "Vol. cm³", 75), ("diameter", "Diám. axial mm", 85)):
             self.morphology_table.heading(key, text=title)
             self.morphology_table.column(key, width=width, anchor="center", stretch=True)
         self.morphology_table.pack(fill="x", pady=(8, 4))
@@ -876,11 +876,11 @@ class TpiLauncher:
             with summary_path.open(newline="", encoding="utf-8") as stream:
                 for row in csv.DictReader(stream):
                     case_id = int(row["case_id"])
-                    extents = [float(row[f"largest_extent_{axis}_mm"]) for axis in ("x", "y", "z")]
-                    diameter = float(np.linalg.norm(extents))
+                    diameter_value = row.get("max_axial_feret_mm")
+                    diameter = f"{float(diameter_value):.1f}" if diameter_value else "—"
                     self.morphology_table.insert("", "end", values=(
                         f"{case_id:03d}", row["connected_components_6"],
-                        f"{float(row['tumor_volume_cm3']):.2f}", f"{diameter:.1f}"))
+                        f"{float(row['tumor_volume_cm3']):.2f}", diameter))
         except (OSError, ValueError, KeyError) as exc:
             self.append_log(f"No se pudo leer el resumen 3D: {exc}")
             return

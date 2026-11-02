@@ -21,8 +21,10 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 | Boxplots de textura entre regiones de referencia | Implementados como script |
 | Resumen de textura por caso | Implementado como tabla y gráfico descriptivo |
 | Diferencias de textura emparejadas por caso | Implementadas como tablas descriptivas |
-| Volumen tumoral y conteo de componentes 3D desde máscaras de referencia | Implementados en la exploración volumétrica opcional |
+| Volumen, burden, componentes y diámetros 3D desde máscaras de referencia | Implementados en la exploración volumétrica opcional |
 | Análisis morfológico 3D de los casos seleccionados, exportación de medidas por lesión y superficies | Implementado como flujo opcional invocable desde el GUI |
+| Evaluación por lesión, errores geométricos y detección por tamaño en cortes 2D | Implementada como flujo posterior a la segmentación |
+| Concordancia Bland–Altman y comparación estadística por caso | Implementadas como análisis posteriores |
 | Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Implementado |
 | Barrido de 252 configuraciones y comparación exploratoria | Implementado |
 | Comparación de filtros sobre un corte y exportación sin GUI | Implementado |
@@ -52,18 +54,14 @@ geométricas y textura GLCM 2D. La segmentación compara umbrales globales, Otsu
 y estadísticos, además de variantes morfológicas, usando Dice e IoU frente a
 las máscaras de referencia.
 
-El **objetivo máximo** agrega un análisis morfológico descriptivo en 3D de las
-máscaras de referencia de los casos seleccionados: volumen tumoral en cm³,
-número de componentes tumorales 6-conexos, volumen y dimensiones del
-paralelepípedo alineado con los ejes de cada componente, y una visualización de
-superficie 3D por caso. Se inicia desde la sección **Cuantificación** del GUI o
-con `python scripts/analyze_morphology_3d.py`, después de generar
-`results/selected_cases_slices.csv`. Los CSV y las figuras se guardan en
-`results/morphology_3d/`. Usa el espaciado físico del NIfTI y el orden canónico
-RAS `(X,Y,Z)`; el conteo 6-conexo considera vecindad por caras. Las medidas
-describen las etiquetas de referencia y no son métricas de una predicción
-automática 3D. El procesamiento exhaustivo y la comparación de métodos se
-mantienen en 2D sobre los cortes seleccionados.
+El **objetivo máximo** agrega morfología descriptiva 3D de las máscaras de
+referencia: volumen tumoral y hepático, carga tumoral, componentes 6-conexos,
+Feret axial y 3D, diámetro esférico equivalente y diagonal de caja por lesión.
+El diámetro máximo informado es el Feret axial máximo (tipo RECIST); Feret 3D
+queda como medida secundaria y la diagonal de caja se conserva con nombre
+explícito porque sobreestima el diámetro. El GUI muestra Feret axial. La
+segmentación automática, la evaluación por lesión, la textura y la comparación
+de métodos siguen siendo 2D sobre cortes seleccionados.
 
 ## 2. Estructura y responsabilidades
 
@@ -75,7 +73,9 @@ mantienen en 2D sobre los cortes seleccionados.
 | `src/psib/preprocessing.py` | Ventana HU, filtros, realce y recorte hepático |
 | `src/psib/segmentation.py` | Umbrales 2D, morfología y componentes conectados |
 | `src/psib/metrics.py` | Dice e IoU entre máscaras binarias |
-| `src/psib/features.py` | Características geométricas por lesión y textura GLCM 2D |
+| `src/psib/features.py` | Geometría y textura GLCM 2D, con entropía y ASM |
+| `src/psib/lesion_eval.py` | Correspondencia split/merge y error geométrico por lesión |
+| `src/psib/morphology3d.py` | Volumen físico, Feret 3D/axial y diámetros equivalentes |
 | `src/psib/compression.py` | Entropía, Huffman, RLE y codec didáctico DCT/JPEG |
 | `src/psib/reconstruction.py` | Atenuación, padding circular seguro y reconstrucción Radon |
 | `scripts/extract_features.py` | Tablas de características para cortes seleccionados |
@@ -84,12 +84,14 @@ mantienen en 2D sobre los cortes seleccionados.
 | `scripts/run_tpi.py` | Selección 2D y segmentación base con ID temporal |
 | `scripts/select_slices_2d.py` | Selección con lectura de máscaras por planos |
 | `scripts/run_segmentation.py` | Ejecuciones base y barrido de parámetros |
+| `scripts/evaluate_lesions.py` | Evaluación de detección y geometría vs. referencia |
+| `scripts/analyze_agreement.py` | Bland–Altman y correlaciones de medidas emparejadas |
+| `scripts/compare_methods.py` | Wilcoxon por caso y corrección Holm |
 | `scripts/run_compression.py` | Comparación de compresión y segmentación por corte |
 | `scripts/run_reconstruction.py` | Simulación tomográfica y comparación de métodos |
 | `scripts/check_requirements.py` | Verificación de dependencias directas del lanzador |
 | `scripts/compare_filters.py` | Comparación de mediana, gaussiano y bilateral |
 | `scripts/explore_dataset.py` | Inventario volumétrico y figuras de contexto |
-| `src/psib/morphology3d.py` | Medidas físicas de componentes tumorales 3D |
 | `scripts/analyze_morphology_3d.py` | CSV y superficies 3D de los casos seleccionados |
 | `src/psib/gui_model.py` | Estado de sidebar y persistencia del perfil, sin dependencias Tk |
 | `src/psib/app_icon.py` | Rutas de iconos y carga defensiva con fallback |
@@ -260,6 +262,8 @@ Valores del YAML base:
 | `selection.minimum_slice_gap` | 2 | Separación antigua en índices, solo para `area_top` |
 | `selection.seed` | 2026 | Semilla del muestreo |
 | `dataset_context.density_tolerance_hu` | 5 | Diferencia absoluta considerada isodensa |
+| `features.glcm_levels` | 16 | Niveles de cuantización GLCM; 32 producía matrices ralas en ROIs chicas |
+| `lesion_eval.min_iou` | 0.0 | IoU mínimo entre componentes para aceptar correspondencia; 0 exige intersección |
 | `compression.qualities` | `[95, 75, 50, 25, 10]` | Calidades JPEG simuladas/medidas |
 | `reconstruction.cases` | `3` | Primeros tres casos seleccionados; admite lista explícita de IDs |
 | `reconstruction.slices_per_case` | 3 | Roles por caso: máximo, pequeño y libre de tumor |
@@ -281,7 +285,7 @@ Valores del YAML base:
 
 El bloque `segmentation` contiene los valores de la sección 8. Admiten
 `--config`: `run_tpi.py`, `select_slices_2d.py`, `run_segmentation.py`,
-`compare_filters.py` y `extract_features.py`. `explore_dataset.py`, `select_cases.py` y
+`compare_filters.py`, `extract_features.py` y `evaluate_lesions.py`. `explore_dataset.py`, `select_cases.py` y
 `preprocess_selected.py` usan el YAML de la raíz. Todos conservan la precedencia
 completa de `config.local.yaml`.
 
@@ -721,6 +725,9 @@ python -m pip check
 | `test_run_tpi.py` | Directorio configurado, fallback, precedencia local, ID temporal y ejecución integrada |
 | `test_slice_io.py` | Lectura por planos, orientación, rango de etiquetas y selección 2D |
 | `test_features.py` | Geometría 2D, espaciado físico y GLCM enmascarada |
+| `test_morphology3d.py` | Medidas físicas de componentes y diámetros 3D |
+| `test_lesion_eval.py` | Correspondencia por lesión, divisiones, fusiones y tamaños |
+| `test_agreement.py` | Bland–Altman, Wilcoxon exacto y ajuste Holm |
 
 La suite incluye tests sintéticos del lanzador y del ejecutor sin requerir
 datos reales. No sustituye una evaluación de calidad de segmentación ni una
@@ -940,26 +947,30 @@ máscara vacía devuelve una tabla sin filas y con las mismas columnas.
 
 ### Textura GLCM en una región
 
-`extract_texture_features(image, roi_mask, levels=32, distances=(1,), angles=...)`
+`extract_texture_features(image, roi_mask, levels=16, distances=(1,), angles=...)`
 recibe una imagen 2D normalizada a `[0, 1]` y una máscara binaria de la región
-de interés con la misma forma. La función cuantiza intensidades en 32 niveles
+de interés con la misma forma. La función cuantiza intensidades en 16 niveles
 por defecto y calcula matrices simétricas para cuatro direcciones en el plano
-(0°, 45°, 90° y 135°) a distancia de un píxel. Distancias, niveles y ángulos
-pueden configurarse.
+(0°, 45°, 90° y 135°) a distancia de un píxel. El default cambió de 32 a 16
+porque las matrices de 32 niveles son ralas en lesiones chicas. Distancias,
+niveles y ángulos pueden configurarse.
 
 Solo cuenta pares donde ambos píxeles caen dentro de la región. Devuelve
-contraste, homogeneidad, energía y correlación, promediados entre los
-desplazamientos que contienen pares válidos. También devuelve `pair_count` y
-`n_offsets`. Si ningún desplazamiento contiene pares, las cuatro propiedades
-son NaN y ambos conteos son cero. Para comparar textura de las referencias,
-usar por separado `seg == 2` para tumor y `seg == 1` para hígado no tumoral, junto
-con la imagen filtrada normalizada.
+contraste, homogeneidad, energía, correlación, entropía y ASM, promediados entre
+desplazamientos con pares válidos. La energía es `sqrt(ASM)`; la entropía se
+calcula como `-sum(p * log2(p))` sobre las entradas no nulas. Homogeneidad
+corresponde al momento inverso de diferencia usado en la cátedra. También
+devuelve `pair_count` y `n_offsets`. Si ningún desplazamiento contiene pares,
+las seis propiedades son NaN y ambos conteos son cero. Para comparar textura de
+las referencias, usar por separado `seg == 2` para tumor y `seg == 1` para
+hígado no tumoral, junto con la imagen filtrada normalizada.
 
 Estas características resumen una región en un corte; sus comparaciones son
 descriptivas cuando la región se define con máscaras de referencia. La API
 permite analizar tanto una referencia como una predicción, pero esta entrega no
 debe interpretarse como evaluación independiente. El resumen generado es
-descriptivo y no realiza pruebas de hipótesis.
+descriptivo. `extract_features.py` además calcula pruebas exactas de signos
+emparejadas por caso para cinco propiedades y ajusta los valores p con Holm.
 
 ### Tablas por selección
 
@@ -968,6 +979,7 @@ Desde la raíz del repositorio y después de generar `<output_dir>/selected_case
 ```bash
 python scripts/extract_features.py
 python scripts/plot_features.py
+python scripts/extract_features.py --levels 8 16 32
 ```
 
 El script lee cada corte seleccionado con `iter_case_slices`, prepara la imagen
@@ -982,19 +994,25 @@ normalizada mediante `prepare_denoised_slice` y escribe estos archivos en
 | `texture_case_differences.csv` | Una fila por caso y propiedad, con textura tumoral menos textura de hígado sano |
 | `texture_difference_summary.csv` | Media, mediana, desvío poblacional, dirección, prueba exacta de signos y p ajustado por Holm para las diferencias entre casos emparejados |
 | `tumor_geometry.csv` | Una fila por componente tumoral 8-conectado, con características geométricas y ubicación de caso/corte |
+| `diagnostics.txt` | Casos sin textura tumoral computable y motivo por corte |
 
-`pair_count` cuenta los pares espaciales válidos antes de simetrizar cada GLCM;
+`texture_per_region.csv` agrega `nan_reason`: `empty_roi`, `no_valid_pairs` o
+vacío cuando hay valores computables. `pair_count` cuenta los pares espaciales válidos antes de simetrizar cada GLCM;
 `n_offsets` cuenta las combinaciones distancia/ángulo que aportaron pares. Las
 propiedades sin pares válidos son NaN. En la tabla de resumen, `n_slices` ignora
 esos valores NaN para cada propiedad. Las máscaras de referencia definen ambas
 regiones, por lo que la comparación de tejidos es descriptiva. Para las
 diferencias por caso, la prueba exacta bilateral de signos evalúa si hay una
 dirección consistente (los empates se excluyen del contraste), y Holm corrige
-las cuatro comparaciones GLCM. Es un análisis exploratorio con pocos casos
-seleccionados, no una validación independiente de la segmentación.
+cinco comparaciones: contraste, homogeneidad, energía, correlación y entropía.
+ASM se informa, pero no se prueba porque es redundante con energía. Con
+`--levels 8 16 32`, cada nivel guarda sus tablas en `features/levels_<n>/` y
+`texture_levels_sensitivity.csv` resume las medianas por región y propiedad.
+Es un análisis exploratorio con pocos casos seleccionados, no una validación
+independiente de la segmentación.
 
 El segundo comando lee ambas tablas de textura y guarda dos figuras, cada una
-con cuatro paneles: contraste, homogeneidad, energía y correlación. En la figura
+con cinco paneles: contraste, homogeneidad, energía, correlación y entropía. En la figura
 por corte, cada caja resume los cortes con valores finitos; en la figura por
 caso, resume las medias de cortes seleccionados dentro de cada caso. La línea es
 la mediana, el triángulo es la media y el tamaño muestral aparece en el eje
@@ -1010,11 +1028,73 @@ volúmenes completos ni una prueba de significancia.
 Las dos tablas de diferencias incluyen solo casos con valores calculables para
 ambas regiones. La diferencia se define como tumor menos hígado sano; positiva
 indica que el descriptor fue mayor en tumor para ese caso. La tabla resumen
-describe magnitud y dirección entre los pares disponibles, sin prueba de
-significancia ni afirmación de separación generalizable.
+describe magnitud y dirección entre los pares disponibles. Las pruebas tienen
+poca potencia con el tamaño de muestra seleccionado y no demuestran separación
+generalizable.
 
 El comando acepta `--config ruta/a/config.yaml`. Usa el `data_dir` configurado
 sin aplicar el fallback del lanzador; corregir esa ruta si fue necesario el fallback.
+
+### Evaluación por lesión, concordancia y comparación de métodos
+
+Tras completar una corrida de segmentación, `evaluate_lesions.py` evalúa cada
+corte seleccionado contra la referencia. Por defecto elige la configuración
+con mejor Dice medio, conserva la corrida y crea `<run>/lesion_eval/`; falla
+si esa carpeta ya existe. La selección debe estar copiada dentro de la corrida
+y las predicciones guardadas por el ejecutor:
+
+```bash
+python scripts/evaluate_lesions.py --run-id <run-id>
+python scripts/evaluate_lesions.py --run-id <run-id> --configuration-id cfg_0001
+```
+
+La correspondencia usa componentes 8-conectados. Una referencia dividida entre
+predicciones solapadas se agrupa; referencias que comparten una predicción se
+consideran fusionadas. `lesion_eval.min_iou` controla el solapamiento mínimo
+por enlace; el default 0 exige intersección positiva. Las clases `<10`,
+`10-20` y `>=20` usan el Feret máximo físico de referencia.
+`lesion_matches.csv` contiene TP/FP/FN, áreas físicas, error relativo firmado
+de área, errores de Feret y Dice por grupo. `detection_per_case.csv` resume
+TP/FP/FN, precisión, recall y F1 sobre los cortes seleccionados de cada caso;
+`detection_summary.csv` agrega medias por caso y recall por tamaño. Es una
+evaluación 2D sobre los cortes seleccionados, no seguimiento entre cortes ni
+validación volumétrica.
+
+El análisis de concordancia requiere la tabla anterior:
+
+```bash
+python scripts/analyze_agreement.py --lesion-matches results/segmentation/<run-id>/lesion_eval/lesion_matches.csv
+```
+
+Guarda diferencias absolutas y porcentuales, sesgo, límites de concordancia al
+95 %, Pearson y Spearman para área y Feret máximo, además de figuras
+Bland–Altman con puntos coloreados por clase. Solo incluye grupos TP.
+
+La comparación de dos configuraciones usa Dice por caso, no los cortes como
+observaciones independientes:
+
+```bash
+python scripts/compare_methods.py --run-id <run-id> --compare best:global,best:otsu
+```
+
+Se pueden repetir opciones `--compare`; `best:<method>` selecciona el mejor
+Dice medio del método y también se aceptan IDs `cfg_xxxx`. Cada comparación
+aplica Wilcoxon bilateral exacto y el conjunto de valores p se ajusta con Holm.
+El CSV advierte cuando hay menos de seis casos emparejados. La salida se crea
+en una subcarpeta de `method_comparisons/`.
+
+### Morfología de referencia 3D
+
+`analyze_morphology_3d.py` carga los volúmenes de etiquetas completos de los
+casos seleccionados, identifica componentes tumorales 6-conectados y exporta
+superficies. El CSV por lesión conserva volumen y extensiones de caja y agrega
+Feret máximo 3D, máximo Feret axial a través de los cortes, diámetro de esfera
+equivalente y diagonal de caja. Feret 3D usa distancias entre puntos extremos
+de la envolvente convexa; Feret axial es el mayor Feret 2D de cualquier corte.
+El CSV por caso informa volumen hepático (`seg > 0`) y carga tumoral (volumen
+tumoral / volumen hepático). La GUI muestra Feret axial para la mayor lesión;
+el CSV conserva diagonal de caja como otra medida. Es cuantificación de las
+máscaras de referencia, no segmentación automática 3D.
 
 ## Interfaz GUI: distribución y controles
 
@@ -1055,10 +1135,9 @@ exportadas se cargan en el visor compartido. **Resultados**
 muestra las imágenes y CSV disponibles, su explicación (si existe una entrada
 en `figure_notes.yaml`) y el registro del flujo.
 
-La tabla 3D muestra volumen total, componentes y la diagonal de la caja alineada
-con los ejes para la mayor lesión como aproximación dimensional; no es un
-diámetro máximo exacto. El análisis exporta las extensiones por eje y medidas
-completas en CSV.
+La tabla 3D muestra volumen, componentes y Feret axial de la mayor lesión.
+El análisis exporta además medidas 3D, extensiones por eje, carga tumoral y la
+diagonal de caja en CSV.
 
 Colapsar con el chevron o `Ctrl+B` cambia a una barra de iconos de 44 px. Los
 iconos conservan la sección activa y al pulsar otro se expande esa sección. Los

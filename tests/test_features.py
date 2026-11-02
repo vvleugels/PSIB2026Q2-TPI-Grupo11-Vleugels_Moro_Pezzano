@@ -16,15 +16,15 @@ class FeatureTests(unittest.TestCase):
     def test_texture_summary_averages_slices_within_case_and_keeps_missing_regions(self):
         frame = pd.DataFrame([
             {"case_id": 1, "region": "tumor_reference", "contrast": 1.0,
-             "homogeneity": 0.2, "energy": 0.3, "correlation": 0.4},
+             "homogeneity": 0.2, "energy": 0.3, "correlation": 0.4, "entropy": 0.5, "asm": 0.2},
             {"case_id": 1, "region": "tumor_reference", "contrast": 3.0,
-             "homogeneity": 0.4, "energy": 0.5, "correlation": 0.6},
+             "homogeneity": 0.4, "energy": 0.5, "correlation": 0.6, "entropy": 0.7, "asm": 0.3},
             {"case_id": 1, "region": "healthy_liver_reference", "contrast": 0.5,
-             "homogeneity": 0.7, "energy": 0.8, "correlation": 0.9},
+             "homogeneity": 0.7, "energy": 0.8, "correlation": 0.9, "entropy": 1.0, "asm": 0.4},
             {"case_id": 2, "region": "tumor_reference", "contrast": np.nan,
-             "homogeneity": np.nan, "energy": np.nan, "correlation": np.nan},
+             "homogeneity": np.nan, "energy": np.nan, "correlation": np.nan, "entropy": np.nan, "asm": np.nan},
             {"case_id": 2, "region": "healthy_liver_reference", "contrast": 1.5,
-             "homogeneity": 0.6, "energy": 0.7, "correlation": 0.8},
+             "homogeneity": 0.6, "energy": 0.7, "correlation": 0.8, "entropy": 0.9, "asm": 0.5},
         ])
 
         summary = summarize_texture_by_case(frame).set_index(["case_id", "region"])
@@ -93,6 +93,8 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(features["homogeneity"], 1.0)
         self.assertEqual(features["energy"], 1.0)
         self.assertEqual(features["correlation"], 1.0)
+        self.assertEqual(features["entropy"], 0.0)
+        self.assertEqual(features["asm"], 1.0)
         self.assertEqual(features["pair_count"], 20)
         self.assertEqual(features["n_offsets"], 4)
 
@@ -108,10 +110,12 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(features["homogeneity"], 0.5)
         self.assertEqual(features["energy"], 2 ** -0.5)
         self.assertEqual(features["correlation"], -1.0)
+        self.assertEqual(features["entropy"], 1.0)
+        self.assertEqual(features["asm"], 0.5)
 
     def test_texture_without_neighbor_pairs_returns_nan_properties(self):
         features = extract_texture_features(np.array([[0.4]]), np.array([[1]]))
-        for name in ("contrast", "homogeneity", "energy", "correlation"):
+        for name in ("contrast", "homogeneity", "energy", "correlation", "entropy", "asm"):
             self.assertTrue(np.isnan(features[name]))
         self.assertEqual(features["pair_count"], 0)
         self.assertEqual(features["n_offsets"], 0)

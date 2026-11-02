@@ -24,12 +24,13 @@ FEATURES = (
     ("homogeneity", "Homogeneidad"),
     ("energy", "Energía"),
     ("correlation", "Correlación"),
+    ("entropy", "Entropía"),
 )
 COLORS = ("#2878a5", "#55a868")
 
 
 def plot_texture_comparison(features_dir: str | Path) -> Path:
-    """Save four boxplots from the per-region texture table and return the path."""
+    """Save five boxplots from the per-region texture table and return the path."""
     features_dir = Path(features_dir)
     source = features_dir / "texture_per_region.csv"
     if not source.is_file():
@@ -52,7 +53,7 @@ def plot_texture_comparison(features_dir: str | Path) -> Path:
                 raise ValueError(f"No hay valores finitos de {feature} para la región {label}.")
             values_by_region[region][feature] = values
 
-    figure, axes = plt.subplots(2, 2, figsize=(10, 8))
+    figure, axes = plt.subplots(2, 3, figsize=(13, 8))
     try:
         for ax, (feature, title) in zip(axes.flat, FEATURES):
             data = [values_by_region[region][feature] for region in REGION_ORDER]
@@ -65,6 +66,7 @@ def plot_texture_comparison(features_dir: str | Path) -> Path:
             ax.set_title(title)
             ax.set_ylabel("Valor GLCM")
             ax.grid(axis="y", alpha=0.25)
+        axes.flat[-1].set_visible(False)
         figure.suptitle(
             "Textura GLCM por región de referencia\n"
             "Comparación descriptiva por corte (línea: mediana; triángulo: media)"
@@ -89,7 +91,7 @@ def plot_case_texture_comparison(features_dir: str | Path) -> Path:
     if frame.empty or not required.issubset(frame.columns):
         raise ValueError(f"{source} debe contener filas y columnas {sorted(required)}.")
 
-    figure, axes = plt.subplots(2, 2, figsize=(10, 8))
+    figure, axes = plt.subplots(2, 3, figsize=(13, 8))
     try:
         for ax, (feature, title) in zip(axes.flat, FEATURES):
             pivot = frame.pivot(index="case_id", columns="region", values=feature)
@@ -121,6 +123,7 @@ def plot_case_texture_comparison(features_dir: str | Path) -> Path:
             ax.set_title(title)
             ax.set_ylabel("Media de cortes por caso")
             ax.grid(axis="y", alpha=0.25)
+        axes.flat[-1].set_visible(False)
         figure.suptitle(
             "Textura GLCM por caso (cortes seleccionados)\n"
             "Las líneas conectan ambas regiones del mismo caso"

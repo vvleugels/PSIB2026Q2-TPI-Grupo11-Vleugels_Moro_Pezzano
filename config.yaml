@@ -15,6 +15,12 @@ selection:
 dataset_context:
   density_tolerance_hu: 5
 
+features:
+  glcm_levels: 16
+
+lesion_eval:
+  min_iou: 0.0
+
 compression:
   qualities: [95, 75, 50, 25, 10]
 

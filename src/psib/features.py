@@ -18,7 +18,8 @@ GEOMETRY_COLUMNS = (
     "centroid_x_mm",
     "centroid_y_mm",
 )
-TEXTURE_COLUMNS = ("contrast", "homogeneity", "energy", "correlation", "pair_count", "n_offsets")
+TEXTURE_COLUMNS = ("contrast", "homogeneity", "energy", "correlation", "entropy", "asm",
+                   "pair_count", "n_offsets")
 
 
 def _validate_mask_and_spacing(
@@ -71,7 +72,7 @@ def extract_texture_features(
     image: np.ndarray,
     roi_mask: np.ndarray,
     *,
-    levels: int = 32,
+    levels: int = 16,
     distances: tuple[int, ...] = (1,),
     angles: tuple[float, ...] = (0.0, np.pi / 4, np.pi / 2, 3 * np.pi / 4),
 ) -> dict[str, float | int]:
@@ -80,8 +81,8 @@ def extract_texture_features(
     ``image`` must be a normalized axial image in [0, 1]. Intensities are
     quantized into ``levels`` bins. For each distance/angle, only pixel pairs
     whose two endpoints are inside ``roi_mask`` contribute to the symmetric
-    co-occurrence matrix. The four properties are averaged over offsets with
-    at least one valid pair. If there are no such pairs, properties are NaN.
+    co-occurrence matrix. Six properties are averaged over offsets with at
+    least one valid pair. If there are no such pairs, properties are NaN.
     """
     image = np.asarray(image)
     mask = np.asarray(roi_mask)
@@ -111,7 +112,7 @@ def extract_texture_features(
     height, width = image.shape
     gray_levels = np.arange(levels, dtype=float)
     difference = gray_levels[:, None] - gray_levels[None, :]
-    offset_features: list[tuple[float, float, float, float]] = []
+    offset_features: list[tuple[float, float, float, float, float, float]] = []
     pair_count = 0
 
     for distance in distances:
@@ -152,18 +153,20 @@ def extract_texture_features(
                     probabilities * (gray_levels[:, None] - row_mean)
                     * (gray_levels[None, :] - col_mean)
                 ) / (row_std * col_std))
-            offset_features.append((
-                float(np.sum(probabilities * difference ** 2)),
-                float(np.sum(probabilities / (1 + difference ** 2))),
-                float(np.sqrt(np.sum(probabilities ** 2))),
-                correlation,
-            ))
+            asm = float(np.sum(probabilities ** 2))
+            nonzero_probabilities = probabilities[probabilities > 0]
+            entropy = float(-np.sum(nonzero_probabilities * np.log2(nonzero_probabilities)))
+            offset_features.append((float(np.sum(probabilities * difference ** 2)),
+                                    float(np.sum(probabilities / (1 + difference ** 2))),
+                                    float(np.sqrt(asm)), correlation, entropy, asm))
             pair_count += count
 
     if not offset_features:
         return {"contrast": float("nan"), "homogeneity": float("nan"), "energy": float("nan"),
-                "correlation": float("nan"), "pair_count": 0, "n_offsets": 0}
+                "correlation": float("nan"), "entropy": float("nan"), "asm": float("nan"),
+                "pair_count": 0, "n_offsets": 0}
     means = np.asarray(offset_features, dtype=float).mean(axis=0)
     return {"contrast": float(means[0]), "homogeneity": float(means[1]),
             "energy": float(means[2]), "correlation": float(means[3]),
+            "entropy": float(means[4]), "asm": float(means[5]),
             "pair_count": pair_count, "n_offsets": len(offset_features)}

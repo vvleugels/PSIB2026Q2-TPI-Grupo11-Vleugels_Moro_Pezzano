@@ -18,6 +18,9 @@ API contracts, output schemas, and experimental limitations.
 | Stratified slice selection | Reference masks, plane reads, physical mm spacing | `selected_cases_slices.csv` |
 | Dataset context | Seeded pool of labeled cases, one volume in memory | `dataset_context_table.csv` |
 | Classical segmentation | 2D axial slices, known liver region, no ML | Dice/IoU tables and prediction figures |
+| Lesion-level evaluation | 2D components, split/merge-aware matches, physical area and Feret diameter | `lesion_eval/` tables and recall plot |
+| Agreement and method statistics | Bland–Altman, Pearson/Spearman, paired Wilcoxon and Holm | Agreement plots and comparison CSVs |
+| GLCM texture | Contrast, homogeneity, energy, correlation, entropy and ASM | Feature tables, plots and level sensitivity |
 | Compression comparison | 8-bit control, PNG/Huffman/RLE and JPEG-like DCT | `results/compression/<run-id>/` |
 | Reconstruction comparison | Simulated acquisition of already reconstructed CT slices | `results/reconstruction/<run-id>/` |
 
@@ -124,10 +127,9 @@ Each experiment writes to a separate timestamped directory under
 
 The **Cuantificación** section runs the available 3D analysis on reference
 masks, showing physical tumor volume, 6-connected component count, and the
-largest component's bounding-box diagonal. Automatic 3D segmentation and
-automatic-versus-reference 3D error are not implemented; this task describes
-the reference masks only. The log is available at the bottom of the
-**Resultados** section.
+largest component's RECIST-like maximum axial Feret diameter. The bounding-box
+diagonal remains a separate measurement in the CSV. This reference-mask
+analysis does not generate automatic 3D segmentation.
 
 #### Application icon and desktop shortcut
 
@@ -178,6 +180,8 @@ ranking; that mode retains index-based `minimum_slice_gap`.
 | `selection.min_tumor_pixels` | 20 | Minimum area for median/small/p75 tumor roles |
 | `selection.seed` | 2026 | Reproducible case sample |
 | `dataset_context.density_tolerance_hu` | 5 | Absolute HU difference treated as isodense |
+| `features.glcm_levels` | 16 | GLCM quantization levels; 32 was sparse on small ROIs |
+| `lesion_eval.min_iou` | 0 | Minimum component IoU accepted as a lesion correspondence |
 | `compression.qualities` | `[95,75,50,25,10]` | JPEG-like quantization qualities |
 | `reconstruction.angles` | `[180,60,20]` | Simulated projection counts |
 | `reconstruction.downsample` | 1 | Optional integer speedup factor |
@@ -198,14 +202,19 @@ The **minimum objective** is to segment and quantify tumors in 2D on axial
 slices from the configured 10 labeled cases. The current configuration requests
 up to 5 slices per case (up to 50 total), with a minimum gap between slices.
 Segmentation variants are compared with Dice and IoU against reference masks;
-2D geometric and GLCM features describe the selected regions.
+2D geometric and GLCM features describe the selected regions. Lesion-level
+evaluation adds split/merge-aware detection counts and automatic-versus-reference
+area and Feret diameter. This remains exploratory evaluation on the same
+selected slices, not an independent test set.
 
-The **maximum objective** adds descriptive 3D morphology from the reference
-masks of the selected cases: physical tumor volume, number of 6-connected
-components, per-component volume and axis-aligned dimensions, plus a 3D surface
-view. This is available from the GUI's **Cuantificación** section or by running
-`python scripts/analyze_morphology_3d.py`. It does not extend the prediction
-pipeline to 3D. The detailed segmentation, features, and evaluation remain 2D.
+The **maximum objective** adds descriptive 3D morphology from reference masks:
+tumor and liver volume, tumor burden, number of 6-connected components,
+per-component 3D and maximum axial Feret diameters, equivalent-sphere diameter,
+and an explicitly named bounding-box diagonal. The reported maximum diameter
+is the largest axial Feret diameter; 3D Feret is secondary, and the bounding-box
+diagonal is retained as a separate measurement because it overestimates
+diameter. It does not extend prediction to 3D. Lesion evaluation, statistics,
+and texture remain 2D.
 
 The selected slices are chosen using reference masks, and the same cases are
 used for the exploratory comparison. Dice/IoU and feature summaries therefore
@@ -301,13 +310,13 @@ millimetres. Pass `(sx, sy)` from the case spacing; the axial slice spacing is
 not used for these 2D measurements.
 
 `psib.features.extract_texture_features(image, roi_mask)` computes contrast,
-homogeneity, energy, and correlation from a symmetric gray-level co-occurrence
-matrix. The image must be normalized to `[0, 1]`, such as the `denoised` output
-of preprocessing. The default uses 32 gray levels, distance 1, and four in-plane
-directions. A pixel pair contributes only when both pixels belong to `roi_mask`.
-Call it separately for tumor (`seg == 2`) and healthy liver (`seg == 1`) when
-comparing reference regions. A region with no valid neighboring pixel pairs
-returns NaN texture values and a pair count of zero.
+homogeneity, energy, correlation, entropy and ASM from a symmetric gray-level
+co-occurrence matrix. The image must be normalized to `[0, 1]`, such as the
+`denoised` output of preprocessing. The default uses 16 gray levels, distance 1,
+and four in-plane directions. A pixel pair contributes only when both pixels
+belong to `roi_mask`. GLCM energy is `sqrt(ASM)`; entropy is
+`-sum(p * log2(p))` over nonzero entries. A region with no valid neighboring
+pixel pairs returns NaN texture values and a pair count of zero.
 
 These measurements describe individual 2D slices. They do not yet calculate a
 3D lesion volume or track a lesion across slices. In the current experiment,
@@ -319,19 +328,29 @@ To build comparison tables for the selected slices, run:
 ```bash
 python scripts/extract_features.py
 python scripts/plot_features.py
+python scripts/extract_features.py --levels 8 16 32
 ```
 
 The command reads `<output_dir>/selected_cases_slices.csv` and writes
 `texture_per_region.csv`, `texture_summary.csv`, and `tumor_geometry.csv` under
 `<output_dir>/features/`. It also writes `texture_per_case.csv`, which averages
-valid selected slices within each case and region. The second command writes
-per-slice and per-case four-panel comparisons under
+valid selected slices within each case and region, and `diagnostics.txt` for
+cases with no computable tumor texture. `texture_per_region.csv` includes
+`nan_reason` (`empty_roi`, `no_valid_pairs`, or empty). The second command writes
+per-slice and per-case five-panel comparisons under
 `<output_dir>/features/figures/`. Per-case means still describe selected slices,
-not complete patient volumes; the plots are descriptive and perform no
-hypothesis tests. The extractor also writes per-case paired differences
+not complete patient volumes. Paired exact sign tests compare five texture
+properties across cases, with Holm adjustment; these exploratory results have
+low power and are not independent validation. With `--levels 8 16 32`, one feature set is written per level
+under `features/levels_<n>/`, and `texture_levels_sensitivity.csv` records the
+median of every property by region and level. The default level changed from 32
+to 16 because 32-level matrices are sparse for small lesions. The extractor
+also writes per-case paired differences
 (tumor minus healthy liver) to `texture_case_differences.csv` and their summary
 to `texture_difference_summary.csv`. The summary includes an exact two-sided
-sign test per property and Holm-adjusted p-values across the four properties.
+sign test for contrast, homogeneity, energy, correlation and entropy, with
+Holm-adjusted p-values across those five properties. ASM is reported but is
+excluded from tests because energy is its square root.
 These exploratory tests use paired case averages, exclude ties from the sign
 test, and do not replace validation against independent segmentation ground
 truth; interpretation is limited by the small number of selected cases.
@@ -339,6 +358,28 @@ truth; interpretation is limited by the small number of selected cases.
 The command accepts `--config path/to/config.yaml` and uses the configured
 data directory directly, without launcher fallback. Segmentation and features
 share `prepare_denoised_slice` for HU windowing and denoising.
+
+For lesion-level detection and size-aware recall, analyze a completed run:
+
+```bash
+python scripts/evaluate_lesions.py --run-id <run-id> --configuration-id best
+python scripts/analyze_agreement.py --lesion-matches results/segmentation/<run-id>/lesion_eval/lesion_matches.csv
+python scripts/compare_methods.py --run-id <run-id> --compare best:global,best:otsu
+```
+
+Lesion matching uses 8-connected 2D components. Each reference component first
+maps to its highest-overlap predicted component; references mapping to the same
+prediction are grouped, and remaining predictions are assigned to their best
+overlapping reference group. The optional `lesion_eval.min_iou` setting defaults
+to zero, meaning any positive overlap is accepted. `lesion_eval/` contains
+`lesion_matches.csv`, `detection_per_case.csv`, `detection_summary.csv`, and
+`recall_by_size_class.png`. Matched groups have signed relative area error,
+automatic-minus-reference Feret error, and group Dice. Agreement analysis
+reports Bland–Altman bias/95% limits, percent differences, and Pearson/Spearman
+correlations for area and max Feret. `compare_methods.py` uses per-case Dice and
+exact two-sided Wilcoxon tests; repeated `--compare A,B` pairs receive Holm
+adjustment. Cases, not slices, are the comparison units; results with fewer than
+six paired cases are flagged as low power.
 
 ## Optional volumetric exploration
 
@@ -376,13 +417,18 @@ denoised images, without enhancement or cropping.
 | `src/psib/preprocessing.py` | HU windowing, denoising, enhancement, liver cropping |
 | `src/psib/segmentation.py` | Global, Otsu, and statistical thresholds with morphology |
 | `src/psib/metrics.py` | Dice and IoU |
-| `src/psib/features.py` | 2D lesion geometry and masked GLCM texture |
+| `src/psib/features.py` | 2D lesion geometry and masked GLCM texture (entropy/ASM included) |
+| `src/psib/lesion_eval.py` | Split/merge-aware 2D lesion matching and geometry errors |
+| `src/psib/morphology3d.py` | Physical lesion volumes and 3D/axial Feret measurements |
 | `src/psib/visualization.py` | Prediction/reference contour overlays |
 | `src/psib/gui_model.py` | Display-independent sidebar state and profile persistence |
 | `src/psib/app_icon.py` | Icon path discovery and safe Tk image loading |
 | `scripts/run_tpi.py` | Automatic selection and timestamped baseline run |
 | `scripts/select_slices_2d.py` | Seeded case selection and slice ranking using 2D reads |
 | `scripts/run_segmentation.py` | Baseline experiments and parameter sweeps |
+| `scripts/evaluate_lesions.py` | Per-lesion detection metrics for a completed run |
+| `scripts/analyze_agreement.py` | Bland–Altman and correlation summaries |
+| `scripts/compare_methods.py` | Paired per-case Wilcoxon comparisons with Holm correction |
 | `scripts/extract_features.py` | Per-region texture, summary, and tumor geometry tables |
 | `scripts/plot_features.py` | Descriptive GLCM boxplots by reference region |
 | `scripts/compare_filters.py` | First-selected-slice denoising comparison |

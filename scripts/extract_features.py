@@ -23,7 +23,8 @@ from psib.features import (
 from psib.preprocessing import prepare_denoised_slice
 
 
-TEXTURE_PROPERTIES = TEXTURE_COLUMNS[:4]
+TEXTURE_PROPERTIES = TEXTURE_COLUMNS[:-2]
+TEXTURE_TEST_PROPERTIES = ("contrast", "homogeneity", "energy", "correlation", "entropy")
 REGIONS = (("tumor_reference", 2), ("healthy_liver_reference", 1))
 
 
@@ -86,7 +87,7 @@ def summarize_paired_texture_differences(case_frame: pd.DataFrame) -> tuple[pd.D
     """Summarize paired differences and exact sign tests by GLCM property."""
     details = []
     summaries = []
-    for property_name in TEXTURE_PROPERTIES:
+    for property_name in TEXTURE_TEST_PROPERTIES:
         pivot = case_frame.pivot(index="case_id", columns="region", values=property_name)
         if not all(region in pivot.columns for region, _ in REGIONS):
             paired = pd.DataFrame(columns=[region for region, _ in REGIONS])
@@ -153,68 +154,98 @@ def _holm_adjust(p_values: list[float]) -> list[float]:
     return adjusted
 
 
-def extract_features(config_path: str | Path | None = None) -> Path:
-    """Write per-region texture, per-tumor geometry, and summary CSV tables."""
-    cfg = load_config(config_path)
-    output_dir = Path(cfg["_output_dir"]) / "features"
+def _extract_one_level(cfg, output_dir: Path, levels: int) -> tuple[Path, pd.DataFrame]:
     output_dir.mkdir(parents=True, exist_ok=True)
     selection = read_selection(Path(cfg["_output_dir"]) / "selected_cases_slices.csv")
-
     texture_rows: list[dict[str, object]] = []
     geometry_rows: list[dict[str, object]] = []
+    reasons_by_case: dict[int, list[str]] = {}
     for case_id, rows in selection.groupby("case_id", sort=True):
         indices = sorted(int(value) for value in rows.slice_index)
-        for slice_index, ct, seg, spacing in iter_case_slices(
-            int(case_id), indices, cfg["data_dir"]
-        ):
+        tumor_reasons = []
+        for slice_index, ct, seg, spacing in iter_case_slices(int(case_id), indices, cfg["data_dir"]):
             image = prepare_denoised_slice(ct, cfg)
-            tumor_mask = seg == 2
             for region_name, label_value in REGIONS:
                 roi = seg == label_value
-                texture = extract_texture_features(image, roi)
+                texture = extract_texture_features(image, roi, levels=levels)
+                nan_reason = ("empty_roi" if not np.any(roi) else
+                              "no_valid_pairs" if texture["pair_count"] == 0 else "")
+                if region_name == "tumor_reference" and nan_reason:
+                    tumor_reasons.append(f"corte {slice_index}: {nan_reason}")
                 texture_rows.append({
-                    "case_id": int(case_id),
-                    "slice_index": int(slice_index),
-                    "region": region_name,
+                    "case_id": int(case_id), "slice_index": int(slice_index), "region": region_name,
                     "pixel_count": int(np.count_nonzero(roi)),
                     "area_mm2": float(np.count_nonzero(roi) * spacing[0] * spacing[1]),
-                    **texture,
+                    **texture, "nan_reason": nan_reason,
                 })
+            component_table = extract_geometric_features(seg == 2, spacing[:2])
+            geometry_rows.extend({"case_id": int(case_id), "slice_index": int(slice_index), **component}
+                                 for component in component_table.to_dict("records"))
+        if tumor_reasons and len(tumor_reasons) == len(indices):
+            reasons_by_case[int(case_id)] = tumor_reasons
 
-            component_table = extract_geometric_features(tumor_mask, spacing[:2])
-            for component in component_table.to_dict("records"):
-                geometry_rows.append({
-                    "case_id": int(case_id),
-                    "slice_index": int(slice_index),
-                    **component,
-                })
-
-    texture_columns = (
-        "case_id", "slice_index", "region", "pixel_count", "area_mm2",
-        *TEXTURE_PROPERTIES, "pair_count", "n_offsets",
-    )
+    texture_columns = ("case_id", "slice_index", "region", "pixel_count", "area_mm2",
+                       *TEXTURE_PROPERTIES, "pair_count", "n_offsets", "nan_reason")
     texture_frame = pd.DataFrame(texture_rows, columns=texture_columns)
-    geometry_columns = ("case_id", "slice_index", *GEOMETRY_COLUMNS)
-    geometry_frame = pd.DataFrame(geometry_rows, columns=geometry_columns)
+    geometry_frame = pd.DataFrame(geometry_rows, columns=("case_id", "slice_index", *GEOMETRY_COLUMNS))
     summary = summarize_texture(texture_frame)
     case_summary = summarize_texture_by_case(texture_frame)
     paired_differences, difference_summary = summarize_paired_texture_differences(case_summary)
-
     texture_frame.to_csv(output_dir / "texture_per_region.csv", index=False)
     geometry_frame.to_csv(output_dir / "tumor_geometry.csv", index=False)
     summary.to_csv(output_dir / "texture_summary.csv", index=False)
     case_summary.to_csv(output_dir / "texture_per_case.csv", index=False)
     paired_differences.to_csv(output_dir / "texture_case_differences.csv", index=False)
     difference_summary.to_csv(output_dir / "texture_difference_summary.csv", index=False)
-    print(f"Saved feature tables for {len(selection)} selected slices under {output_dir}", flush=True)
-    return output_dir
+    diagnostic_lines = [f"Casos sin textura tumoral computable en todos sus cortes (GLCM levels={levels}):"]
+    diagnostic_lines.extend(f"Caso {case_id:03d}: " + "; ".join(reasons)
+                            for case_id, reasons in sorted(reasons_by_case.items()))
+    if not reasons_by_case:
+        diagnostic_lines.append("Ningún caso quedó sin textura computable en todos sus cortes.")
+    (output_dir / "diagnostics.txt").write_text("\n".join(diagnostic_lines) + "\n", encoding="utf-8")
+    print(f"Saved feature tables at {levels} GLCM levels under {output_dir}", flush=True)
+    return output_dir, texture_frame
+
+
+def extract_features(config_path: str | Path | None = None,
+                     levels: list[int] | tuple[int, ...] | None = None) -> Path:
+    """Write feature tables at the configured GLCM level or requested sensitivity levels."""
+    cfg = load_config(config_path)
+    root = Path(cfg["_output_dir"]) / "features"
+    if levels is None:
+        configured = cfg.get("features", {}).get("glcm_levels", 16)
+        if isinstance(configured, bool) or not isinstance(configured, int) or not 2 <= configured <= 256:
+            raise ValueError("features.glcm_levels debe ser un entero entre 2 y 256.")
+        return _extract_one_level(cfg, root, configured)[0]
+    levels = tuple(levels)
+    if not levels or any(isinstance(value, bool) or value not in (8, 16, 32) for value in levels):
+        raise ValueError("levels debe incluir uno o más valores de 8, 16 o 32.")
+    if len(set(levels)) != len(levels):
+        raise ValueError("levels no debe repetir valores.")
+    sensitivity = []
+    for level in levels:
+        level_dir = root / f"levels_{level}"
+        _, frame = _extract_one_level(cfg, level_dir, level)
+        for region, _ in REGIONS:
+            selected = frame[frame.region == region]
+            for property_name in TEXTURE_PROPERTIES:
+                values = pd.to_numeric(selected[property_name], errors="coerce").dropna()
+                sensitivity.append({"levels": level, "region": region, "feature": property_name,
+                                    "n_values": len(values),
+                                    "median": float(values.median()) if len(values) else np.nan})
+    root.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(sensitivity).to_csv(root / "texture_levels_sensitivity.csv", index=False)
+    print(f"Saved GLCM level sensitivity under {root}", flush=True)
+    return root
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / "config.yaml")
+    parser.add_argument("--levels", type=int, nargs="+", choices=(8, 16, 32),
+                        help="Run sensitivity analysis, e.g. --levels 8 16 32.")
     args = parser.parse_args()
-    extract_features(args.config)
+    extract_features(args.config, args.levels)
 
 
 if __name__ == "__main__":

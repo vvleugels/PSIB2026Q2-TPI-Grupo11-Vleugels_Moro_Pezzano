@@ -82,17 +82,26 @@ def analyze(config_path: Path) -> Path:
         spacing = _spacing_for_case(case_id, cfg["data_dir"])
         components, render_data = tumor_components_3d(segmentation, spacing)
         voxel_count = int(np.count_nonzero(segmentation == 2))
+        liver_voxel_count = int(np.count_nonzero(segmentation > 0))
         total_volume = voxel_count * float(np.prod(spacing)) / 1000.0
+        liver_volume = liver_voxel_count * float(np.prod(spacing)) / 1000.0
         largest = components[0] if components else None
         summaries.append({
             "case_id": case_id,
             "tumor_voxels": voxel_count,
             "tumor_volume_cm3": total_volume,
+            "liver_voxels": liver_voxel_count,
+            "liver_volume_cm3": liver_volume,
+            "tumor_burden": total_volume / liver_volume if liver_volume else 0.0,
             "connected_components_6": len(components),
             "largest_component_cm3": largest["volume_cm3"] if largest else 0.0,
             "largest_extent_x_mm": largest["extent_x_mm"] if largest else 0.0,
             "largest_extent_y_mm": largest["extent_y_mm"] if largest else 0.0,
             "largest_extent_z_mm": largest["extent_z_mm"] if largest else 0.0,
+            "max_feret_3d_mm": largest["max_feret_3d_mm"] if largest else 0.0,
+            "max_axial_feret_mm": largest["max_axial_feret_mm"] if largest else 0.0,
+            "equivalent_diameter_mm": largest["equivalent_diameter_mm"] if largest else 0.0,
+            "bbox_diagonal_mm": largest["bbox_diagonal_mm"] if largest else 0.0,
             "spacing_x_mm": spacing[0], "spacing_y_mm": spacing[1], "spacing_z_mm": spacing[2],
         })
         for item in components:
@@ -104,6 +113,8 @@ def analyze(config_path: Path) -> Path:
     pd.DataFrame(summaries).to_csv(output / "morphology_3d_per_case.csv", index=False)
     pd.DataFrame(lesions, columns=["case_id", "component_id", "voxel_count", "volume_cm3",
                                    "extent_x_mm", "extent_y_mm", "extent_z_mm",
+                                   "max_feret_3d_mm", "max_axial_feret_mm",
+                                   "equivalent_diameter_mm", "bbox_diagonal_mm",
                                    "bbox_start_x", "bbox_start_y", "bbox_start_z"]
                  ).to_csv(output / "morphology_3d_per_lesion.csv", index=False)
     print(f"Resultados guardados en {output}", flush=True)
