@@ -26,7 +26,7 @@ from scipy import ndimage
 from psib.config import load_config
 from psib.data_io import iter_case_slices
 from psib.metrics import dice_score, iou_score
-from psib.preprocessing import prepare_denoised_slice
+from psib.preprocessing import apply_hu_window, prepare_denoised_slice
 from psib.segmentation import _validate_settings, segment_slice
 
 
@@ -144,21 +144,23 @@ def choose_best(summary, configurations):
                               ascending=[False, False, True]).drop_duplicates("method").reset_index(drop=True)
 
 
-def export_prediction(out, configuration_id, case_id, k, image, reference, pred):
+def export_prediction(out, configuration_id, case_id, k, original, image, reference, pred):
+    """Save a square 2×2 comparison: original, denoised, reference, prediction."""
     directory = out / "predictions" / configuration_id
     directory.mkdir(parents=True, exist_ok=True)
     stem = f"case_{case_id:03d}_slice_{k:03d}"
     np.save(directory / f"{stem}.npy", pred, allow_pickle=False)
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    fig, axes = plt.subplots(2, 2, figsize=(8, 8))
     try:
-        for ax, array, title in zip(axes, (image, reference, pred),
-                                    ("Denoised", "Tumor reference", "Prediction")):
+        panels = ((original, "Original"), (image, "Denoised"),
+                  (reference, "Tumor reference"), (pred, "Prediction"))
+        for ax, (array, title) in zip(axes.flat, panels):
             ax.imshow(array.T, cmap="gray", origin="lower", vmin=0, vmax=1)
             ax.set_title(title)
             ax.axis("off")
         fig.suptitle(f"Case {case_id} / slice {k} / {configuration_id} — "
                      f"Dice={dice_score(pred, reference):.4f}; IoU={iou_score(pred, reference):.4f}")
-        fig.tight_layout()
+        fig.tight_layout(rect=(0, 0, 1, 0.96))
         fig.savefig(directory / f"{stem}.png", dpi=100)
     finally:
         plt.close(fig)
@@ -221,6 +223,9 @@ def run_experiment(config_path, run_id, sweep=False):
                 context = f"caso {case_id}, cortes {indices}"
                 for k, hu, labels, _ in iter_case_slices(case_id, indices, cfg["data_dir"]):
                     context = f"caso {case_id}, corte {k}"
+                    window = cfg.get("preprocessing", {}).get("hu_window", {})
+                    original = apply_hu_window(
+                        hu, float(window.get("center", 60)), float(window.get("width", 400)))
                     image = prepare_image(hu, cfg)
                     liver, reference = labels > 0, labels == 2
                     for record, pred in iter_predictions(image, liver, active):
@@ -233,7 +238,7 @@ def run_experiment(config_path, run_id, sweep=False):
                                          "union": int(np.count_nonzero(pred | reference)),
                                          "dice": dice_score(pred, reference), "iou": iou_score(pred, reference)})
                         if export_only or not sweep:
-                            export_prediction(out, cid, case_id, k, image, reference, pred)
+                            export_prediction(out, cid, case_id, k, original, image, reference, pred)
                 del hu, labels, image, liver, reference, pred
                 print(f"{'Exportado' if export_only else 'Evaluado'} caso {case_id}", flush=True)
 

@@ -832,7 +832,7 @@ segunda pasada por casos para exportar las tres variantes ganadoras.
 | `best_configurations.csv` | Mejor configuración de cada método; solo en barrido |
 | `run.json` | Estado, argumentos, tiempos UTC, versiones, revisión Git y cambios locales |
 | `predictions/<configuration_id>/*.npy` | Máscaras booleanas completas, sin transposición |
-| `predictions/<configuration_id>/*.png` | Imagen filtrada, referencia y predicción, con métricas |
+| `predictions/<configuration_id>/*.png` | Grilla cuadrada 2×2: imagen original con ventana HU, imagen denoised, referencia tumoral y predicción, con métricas |
 
 Los CSV de métricas identifican la configuración mediante `configuration_id`;
 los parámetros completos se consultan en `configurations.csv`. `pred_area` y

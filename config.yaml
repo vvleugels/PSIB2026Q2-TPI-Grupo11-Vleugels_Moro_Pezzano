@@ -29,8 +29,8 @@ reconstruction:
 
 preprocessing:
   hu_window:
-    center: 60
-    width: 400
+    center: 30
+    width: 150
   denoising:
     method: median
     median_size: 3
