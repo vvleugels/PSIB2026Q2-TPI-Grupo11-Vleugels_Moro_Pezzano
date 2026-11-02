@@ -63,10 +63,15 @@ class SliceIOTests(unittest.TestCase):
         seg[2:5, 2:5, 5] = 2
         self.save(ct, seg, np.eye(4))
         config = self.root / 'config.yaml'
-        config.write_text('data_dir: .\noutput_dir: results\nselection:\n  n_cases: 1\n  slices_per_case: 3\n  minimum_slice_gap: 2\n')
+        config.write_text('data_dir: .\noutput_dir: results\nselection:\n  n_cases: 1\n  slices_per_case: 3\n  slice_strategy: area_top\n  minimum_slice_gap: 2\n')
         import pandas as pd
         selected = pd.read_csv(select_2d(config))
         self.assertEqual(selected.slice_index.tolist(), [1, 3, 5])
+        self.assertEqual(selected.slice_role.tolist(), ['area_top'] * 3)
+        self.assertEqual(selected.tumor_area_px.tolist(), [25, 16, 9])
+        self.assertEqual(selected.liver_area_px.tolist(), [81, 81, 81])
+        self.assertEqual(selected.slice_position_mm.tolist(), [1.0, 3.0, 5.0])
+        self.assertTrue(selected.selection_criteria.str.contains('minimum index gap=2').all())
         self.assertNotIn('tumor_lesions_3d', selected.columns)
 
 

@@ -13,6 +13,14 @@ reference masks; the segmentation pipeline itself remains 2D.
 See [documentation.md](documentation.md) for the detailed Spanish guide,
 API contracts, output schemas, and experimental limitations.
 
+| Capability | Scope | Main output |
+| --- | --- | --- |
+| Stratified slice selection | Reference masks, plane reads, physical mm spacing | `selected_cases_slices.csv` |
+| Dataset context | Seeded pool of labeled cases, one volume in memory | `dataset_context_table.csv` |
+| Classical segmentation | 2D axial slices, known liver region, no ML | Dice/IoU tables and prediction figures |
+| Compression comparison | 8-bit control, PNG/Huffman/RLE and JPEG-like DCT | `results/compression/<run-id>/` |
+| Reconstruction comparison | Simulated acquisition of already reconstructed CT slices | `results/reconstruction/<run-id>/` |
+
 ## Install
 
 Python 3.12 is the target version. Run commands from the repository root.
@@ -147,11 +155,29 @@ the complete base file before customizing local paths. Relative data/output
 paths resolve from the selected config file's directory. Default output is
 `results/`, ignored by Git.
 
-The 2D workflow uses `selection.n_cases` (10), `slices_per_case` (3–5; default
-5), `minimum_slice_gap` (2), and `seed` (2026). It samples cases without volume
-stratification and ranks slices by tumor area, liver area, then index. It can
-select fewer slices when the gap prevents the requested count. The
-`candidate_pool_size` setting belongs to the optional volumetric workflow.
+The 2D workflow uses a seeded case sample and defaults to stratified slice roles
+(largest, median, small, 75th percentile, and tumor-free). It enforces a 10 mm
+gap using each scan's axial spacing and selects 5 slices per case (also accepts
+3 or 4). Set `slice_strategy: area_top` to reproduce the previous tumor-area
+ranking; that mode retains index-based `minimum_slice_gap`.
+
+| Setting | Default | Meaning |
+| --- | ---: | --- |
+| `selection.n_cases` | 10 | Cases sampled for 2D selection |
+| `selection.slices_per_case` | 5 | Requested slices per case; 3–5 supported |
+| `selection.slice_strategy` | `stratified` | Role-based strategy or legacy `area_top` |
+| `selection.minimum_slice_gap_mm` | 10 | Minimum physical separation for stratified slices |
+| `selection.min_tumor_pixels` | 20 | Minimum area for median/small/p75 tumor roles |
+| `selection.seed` | 2026 | Reproducible case sample |
+| `dataset_context.density_tolerance_hu` | 5 | Absolute HU difference treated as isodense |
+| `compression.qualities` | `[95,75,50,25,10]` | JPEG-like quantization qualities |
+| `reconstruction.angles` | `[180,60,20]` | Simulated projection counts |
+| `reconstruction.downsample` | 1 | Optional integer speedup factor |
+| `reconstruction.sart_iterations` | 3 | SART iterations per reconstruction |
+| `reconstruction.sart_relaxation` | 0.15 | SART relaxation factor |
+| `reconstruction.cases` | `3` | First three selected cases; a list can name case IDs explicitly |
+| `reconstruction.slices_per_case` | 3 | Role slices per case |
+| `reconstruction.margin` | 8 | Liver ROI margin in pixels |
 
 All selection uses reference masks. Segmentation also uses the known liver
 region; tumor references are used for selection and evaluation, not as inputs
@@ -203,6 +229,42 @@ slice and case, summary tables, status in `run.json`, and prediction masks and
 figures. Case metrics pool pixel counts over selected slices; summaries weight
 cases equally. Sweep runs export masks/figures for the winning configuration
 of each method. Failed runs may leave partial output; choose a new ID to retry.
+
+### Dataset context, compression, and reconstruction experiments
+
+```bash
+python scripts/explore_dataset.py
+python scripts/run_compression.py --run-id compression-base
+python scripts/run_reconstruction.py --run-id reconstruction-base
+```
+
+The dataset inventory adds liver burden, signed tumor-to-liver HU difference,
+density, and equivalent-sphere component-size counts. It writes
+`dataset_context_table.csv` and `figures/delta_hu_vs_tumor_volume.png` in the
+configured output directory. Inventory reads only paired labeled cases and
+keeps one full volume in memory at a time.
+
+The compression experiment evaluates every slice in
+`selected_cases_slices.csv` and writes `results/compression/<run-id>/` with
+per-slice, per-case, and condition-summary CSVs plus quality and example-grid
+figures. PNG is checked for an exact 8-bit round trip; Huffman/RLE sizes and the
+JPEG-like entropy size are estimators, and actual OpenCV JPEG sizes are also
+recorded. Texture properties use reference-defined tumor and healthy-liver
+regions for descriptive comparison. No tumor reference is passed to the
+segmentation algorithm.
+
+The reconstruction experiment is a **simulation**: LiTS images are already
+reconstructed CTs. It selects the first three cases and the largest, small, and
+tumor-free role slices by default. It writes `results/reconstruction/<run-id>/`
+with per-slice, per-case, and summary metrics, a sinogram, a reconstruction grid,
+and Dice versus angle count. Backprojection, ramp/Hann filtered backprojection,
+and iterative SART are compared. The default run can take substantially longer
+than 2D segmentation; use `reconstruction.downsample` to trade spatial detail
+for speed. The requested attenuation mapping clamps HU below −1000 to zero,
+so those air values cannot be recovered exactly. Case-scope segmentation also
+requires the not-yet-integrated `psib.case_stats` API; the experiment stops with
+a clear error rather than silently falling back to slice statistics. All
+results are exploratory on reference-selected cases and slices.
 
 ## Compare denoising filters
 
@@ -281,9 +343,10 @@ python scripts/preprocess_selected.py
 ```
 
 Run in order. Exploration writes `candidate_pool.csv`, `dataset_inventory.csv`,
-and context figures. Selection balances cases across tumor-volume terciles,
+`dataset_context_table.csv`, and context figures. Selection balances cases across tumor-volume terciles,
 requires at least one multi-lesion case, and writes the same selection CSV
 used by the 2D workflow. It fails if the candidate pool cannot meet its criteria.
+Slice roles use mm spacing and record shortage warnings in the CSV criteria.
 Preprocessing saves HU-window, denoised, and liver-crop figures for selected
 slices. These scripts use the repository configuration and do not accept
 `--config`. Regenerating selection replaces the shared selection CSV.
@@ -300,6 +363,8 @@ denoised images, without enhancement or cropping.
 | `src/psib/config.py` | Config precedence, absolute paths, output directories |
 | `src/psib/data_io.py` | Paired NIfTI discovery, volume and bounded-memory slice loading |
 | `src/psib/dataset.py` | Inventory and volume-based case/slice selection |
+| `src/psib/compression.py` | Huffman/RLE estimators and block-DCT JPEG-like codec |
+| `src/psib/reconstruction.py` | HU/attenuation conversion and Radon reconstruction helpers |
 | `src/psib/preprocessing.py` | HU windowing, denoising, enhancement, liver cropping |
 | `src/psib/segmentation.py` | Global, Otsu, and statistical thresholds with morphology |
 | `src/psib/metrics.py` | Dice and IoU |
@@ -315,6 +380,9 @@ denoised images, without enhancement or cropping.
 | `scripts/compare_filters.py` | First-selected-slice denoising comparison |
 | `scripts/explore_dataset.py` | Volume inventory and context figures |
 | `scripts/select_cases.py` | Volume-stratified case and slice selection |
+| `scripts/run_compression.py` | Lossless/lossy compression comparison on selected slices |
+| `scripts/run_reconstruction.py` | Simulated acquisition and reconstruction comparison |
+| `scripts/check_requirements.py` | Fast direct dependency check for the Windows launcher |
 | `scripts/preprocess_selected.py` | Selected-slice preprocessing figures |
 | `PSIB.bat` | Windows environment setup, dependency checks, and GUI launcher |
 | `scripts/build_icons.py` | Deterministic icon asset builder from the supplied master |
@@ -352,6 +420,6 @@ python -m pip check
 ```
 
 Tests use small synthetic datasets and do not require local CT files. They
-cover loading, selection, preprocessing, segmentation, metrics, filter
-comparison, 2D geometry/texture, and launcher data fallback/timestamp behavior. The synthetic
+cover loading, stratified and legacy selection, preprocessing, segmentation,
+metrics, filter comparison, compression and reconstruction helpers, 2D geometry/texture, and launcher data fallback/timestamp behavior. The synthetic
 launcher test exercises the Python workflow; it does not execute Windows CMD.

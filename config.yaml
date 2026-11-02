@@ -5,8 +5,27 @@ selection:
   candidate_pool_size: 15
   n_cases: 10
   slices_per_case: 5
+  slice_strategy: stratified
+  minimum_slice_gap_mm: 10
+  min_tumor_pixels: 20
+  # Legacy index spacing used only by slice_strategy: area_top.
   minimum_slice_gap: 2
   seed: 2026
+
+dataset_context:
+  density_tolerance_hu: 5
+
+compression:
+  qualities: [95, 75, 50, 25, 10]
+
+reconstruction:
+  angles: [180, 60, 20]
+  downsample: 1
+  cases: 3
+  slices_per_case: 3
+  sart_iterations: 3
+  sart_relaxation: 0.15
+  margin: 8
 
 preprocessing:
   hu_window:

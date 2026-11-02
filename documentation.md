@@ -26,6 +26,10 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 | Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Implementado |
 | Barrido de 252 configuraciones y comparación exploratoria | Implementado |
 | Comparación de filtros sobre un corte y exportación sin GUI | Implementado |
+| Selección de roles tumorales con separación física en mm | Implementada; `area_top` mantiene el método previo |
+| Tabla de contexto HU, burden y tamaños de lesión | Implementada en el inventario etiquetado |
+| Experimento de compresión reversible e irreversible | Implementado sobre cortes seleccionados |
+| Simulación de adquisición y reconstrucción tomográfica | Implementada; no es adquisición clínica real |
 | Lanzador con fallback de datos e identificadores temporales | Implementado |
 | Interfaz gráfica para iniciar el flujo 2D y revisar su registro | Implementada como lanzador de escritorio |
 | Superposición de contornos de predicción y referencia | Disponible como API Python |
@@ -72,12 +76,17 @@ mantienen en 2D sobre los cortes seleccionados.
 | `src/psib/segmentation.py` | Umbrales 2D, morfología y componentes conectados |
 | `src/psib/metrics.py` | Dice e IoU entre máscaras binarias |
 | `src/psib/features.py` | Características geométricas por lesión y textura GLCM 2D |
+| `src/psib/compression.py` | Entropía, Huffman, RLE y codec didáctico DCT/JPEG |
+| `src/psib/reconstruction.py` | Atenuación, padding circular seguro y reconstrucción Radon |
 | `scripts/extract_features.py` | Tablas de características para cortes seleccionados |
 | `scripts/plot_features.py` | Boxplots descriptivos de propiedades GLCM por tejido |
 | `src/psib/visualization.py` | Contornos de predicción y referencia sobre CT |
 | `scripts/run_tpi.py` | Selección 2D y segmentación base con ID temporal |
 | `scripts/select_slices_2d.py` | Selección con lectura de máscaras por planos |
 | `scripts/run_segmentation.py` | Ejecuciones base y barrido de parámetros |
+| `scripts/run_compression.py` | Comparación de compresión y segmentación por corte |
+| `scripts/run_reconstruction.py` | Simulación tomográfica y comparación de métodos |
+| `scripts/check_requirements.py` | Verificación de dependencias directas del lanzador |
 | `scripts/compare_filters.py` | Comparación de mediana, gaussiano y bilateral |
 | `scripts/explore_dataset.py` | Inventario volumétrico y figuras de contexto |
 | `src/psib/morphology3d.py` | Medidas físicas de componentes tumorales 3D |
@@ -245,8 +254,19 @@ Valores del YAML base:
 | `selection.candidate_pool_size` | 15 | Máximo de candidatos muestreados |
 | `selection.n_cases` | 10 | Casos finales |
 | `selection.slices_per_case` | 5 | Cortes solicitados por caso; el script admite 3 a 5 |
-| `selection.minimum_slice_gap` | 2 | Separación mínima en índices, no en mm |
+| `selection.slice_strategy` | `stratified` | Roles tumorales o `area_top` legado |
+| `selection.minimum_slice_gap_mm` | 10 | Separación física entre cortes estratificados |
+| `selection.min_tumor_pixels` | 20 | Área mínima para roles de tumor pequeño/mediano |
+| `selection.minimum_slice_gap` | 2 | Separación antigua en índices, solo para `area_top` |
 | `selection.seed` | 2026 | Semilla del muestreo |
+| `dataset_context.density_tolerance_hu` | 5 | Diferencia absoluta considerada isodensa |
+| `compression.qualities` | `[95, 75, 50, 25, 10]` | Calidades JPEG simuladas/medidas |
+| `reconstruction.cases` | `3` | Primeros tres casos seleccionados; admite lista explícita de IDs |
+| `reconstruction.slices_per_case` | 3 | Roles por caso: máximo, pequeño y libre de tumor |
+| `reconstruction.angles` | `[180, 60, 20]` | Número de proyecciones simuladas |
+| `reconstruction.downsample` | 1 | Factor entero opcional de reducción para acelerar |
+| `reconstruction.sart_iterations` | 3 | Iteraciones SART por corte y número de ángulos |
+| `reconstruction.sart_relaxation` | 0.15 | Relajación de SART |
 | `preprocessing.hu_window.center` | 60 | Centro HU |
 | `preprocessing.hu_window.width` | 400 | Ancho HU |
 | `preprocessing.denoising.method` | `median` | Filtro activo |
@@ -266,8 +286,10 @@ El bloque `segmentation` contiene los valores de la sección 8. Admiten
 completa de `config.local.yaml`.
 
 `candidate_pool_size` se utiliza solo en el inventario volumétrico. La selección
-2D usa `n_cases`, `slices_per_case`, `minimum_slice_gap` y `seed` sin calcular
-terciles ni componentes 3D. El fallback de datos pertenece únicamente a
+2D usa `n_cases`, `slices_per_case`, `slice_strategy`, `minimum_slice_gap_mm`,
+`min_tumor_pixels` y `seed` sin calcular terciles ni componentes 3D. Las claves
+nuevas tienen valores por omisión en el código para que un `config.local.yaml`
+anterior que reemplaza completamente al base siga funcionando. El fallback de datos pertenece únicamente a
 `run_tpi.py`; los scripts individuales usan `data_dir` directamente.
 
 ## 6. Flujos ejecutables y archivos de salida
@@ -331,15 +353,28 @@ Genera:
 
 - `results/candidate_pool.csv`: identificador, orden, semilla y criterio de muestreo.
 - `results/dataset_inventory.csv`: dimensiones, espaciado, estadísticas HU,
-  conteos de etiquetas, volumen tumoral y componentes tumorales 3D.
+  conteos de etiquetas, volumen tumoral, componentes y contexto HU/hepático.
+- `results/dataset_context_table.csv`: tabla compacta para el informe, con caso,
+  geometría, volumen, lesiones, burden, delta HU, densidad y categorías de tamaño.
 - `results/figures/hu_histogram.png`.
 - `results/figures/tumor_volume_distribution.png`.
 - `results/figures/spacing_distribution.png`.
+- `results/figures/delta_hu_vs_tumor_volume.png`: delta HU firmado frente al
+  volumen tumoral, con cada caso rotulado.
 
 El histograma HU usa hasta 100 000 vóxeles por caso del pool, muestreados en
 todo el CT. El volumen tumoral en cm³ se calcula como
 `tumor_voxels * sx * sy * sz / 1000`. La columna `liver_voxels` cuenta solo
-la etiqueta 1, mientras que la región de segmentación `seg > 0` incluye 1 y 2.
+la etiqueta 1 (hígado sano) y excluye tumor; `liver_total_voxels` cuenta
+`seg > 0`, y `liver_volume_cm3` usa esa región total. `tumor_burden` es el
+cociente entre vóxeles tumorales y `liver_total_voxels`. Las medianas HU se
+calculan en `seg == 1` y `seg == 2`; `delta_hu` es tumor menos hígado sano y
+conserva el signo. `contrast_class` usa magnitud absoluta en `<20`, `[20,40)`,
+`[40,60)` y `>=60` HU. `density` clasifica el delta como hipodenso, hiperdenso
+o isodenso dentro de `dataset_context.density_tolerance_hu` (5 HU por defecto).
+Los conteos `lesions_lt10mm`, `lesions_10_20mm` y `lesions_gt20mm` agrupan
+componentes 6-conexos por diámetro de esfera equivalente (10–20 incluye ambos
+extremos). El conteo existente
 El conteo `tumor_lesions_3d` usa componentes conectados con la conectividad
 predeterminada de SciPy en 3D: 6 vecinos. Es un conteo de componentes, no una
 identificación clínica de lesiones.
@@ -355,15 +390,21 @@ tumorales cuando estén disponibles. Se informa un error si faltan tres
 terciles distinguibles, se solicitan más casos que los disponibles o no hay
 ningún caso con múltiples componentes.
 
-Los cortes se ordenan por área tumoral descendente, luego por área hepática
-y finalmente por índice. Se eligen respetando la separación mínima y se
-devuelven ordenados por índice. Puede obtenerse menos cantidad que la solicitada
-si el espaciado entre índices lo impide; también pueden incluirse cortes sin
-tumor. La función no garantiza por sí sola que todos los cortes tengan hígado.
+La estrategia predeterminada asigna, en orden, los roles de tumor máximo,
+mediano, pequeño, percentil 75 y libre de tumor; con 3 cortes usa máximo,
+pequeño y libre de tumor, y con 4 agrega mediano. Los roles se separan por
+`minimum_slice_gap_mm` usando el `sz` propio del caso. Los roles que no puedan
+completarse se registran en `selection_criteria` y producen una advertencia;
+la selección continúa. `area_top` conserva el ranking anterior y la distancia
+por índices de `minimum_slice_gap` para reproducibilidad. El flujo 2D solo lee
+planos de máscaras (`mask_only=True`), sin cargar CT ni materializar volúmenes.
 
 El CSV incluye `selection_rank`, `case_id`, `slice_index`, `tumor_volume_cm3`,
 `tumor_lesions_3d`, `burden_tercile`, `candidate_pool_size`, `seed` y
-`selection_criteria`.
+`selection_criteria`. Ambos selectores preservan sus columnas originales y
+agregan `slice_role`, `tumor_area_px`, `liver_area_px` (etiquetas `seg > 0`) y
+`slice_position_mm` (`slice_index * sz`). Lectores existentes deben ignorar las
+columnas extra y conservar los nombres conocidos.
 
 ### Figuras de preprocesamiento
 
@@ -376,6 +417,99 @@ results/figures/preprocess_case_003_slice_042.png
 
 Los índices del nombre son ejemplos. El script exporta figuras PNG, no arrays
 de preprocesamiento ni máscaras tumorales.
+
+### Experimento de compresión
+
+Después de crear `selected_cases_slices.csv`:
+
+```bash
+python scripts/run_compression.py --run-id compresion-base
+```
+
+El programa procesa todos los pares caso/corte seleccionados y crea un
+directorio exclusivo en `results/compression/<run-id>/`. La entrada es la salida
+normalizada de `prepare_denoised_slice`, cuantizada como `round(255*x)`; ese
+array de 8 bits es el control sin compresión. Ninguna etiqueta de tumor se
+entrega a `segment_slice`: el algoritmo recibe solo la imagen y `seg > 0`; las
+referencias `seg == 2` se usan después para métricas y para definir las ROIs de
+textura.
+
+Las condiciones sin pérdida son PNG OpenCV nivel 9 (con comprobación de
+igualdad exacta al decodificar), estimación Huffman por entropía/código medio y
+RLE fila por fila. Los tamaños Huffman y RLE no incluyen metadatos; Huffman
+guarda también su tabla en `huffman_code_table_json`. JPEG simulado usa DCT 8×8,
+tabla de luminancia estándar escalada por calidad IJG, orden zigzag, RLE y
+longitudes Huffman estimadas. Se compara la estimación con el tamaño del archivo
+JPEG real de OpenCV a la misma calidad. La imagen reconstruida por DCT, no la
+decodificación de OpenCV, alimenta métricas, segmentación y textura.
+
+Cada fila calcula razón `bits_original / bits_comprimidos`, redundancia relativa
+`1 - 1/C`, bits por píxel, PSNR y SSIM frente al control, además de Dice e IoU.
+La tabla incluye propiedades de textura de tumor y de hígado sano para cada
+propiedad numérica que devuelva `extract_texture_features`, y su cambio relativo
+frente al control. Si una propiedad base vale cero o no es calculable, el cambio
+relativo es NaN.
+
+| Salida | Contenido |
+| --- | --- |
+| `per_slice.csv` | Medidas por caso, corte y condición; código Huffman JSON y cambios de textura |
+| `per_case.csv` | Medias de cortes por caso y condición |
+| `summary.csv` | Conteos, medias y desvíos por condición/calidad |
+| `effective_config.yaml`, `selected_cases_slices.csv`, `run.json` | Configuración, selección y estado/tiempos |
+| `figures/compression_ratio_vs_quality.png` | Razón de compresión JPEG real contra calidad |
+| `figures/dice_vs_quality.png` | Dice de tumor frente a calidad |
+| `figures/texture_relative_change_vs_quality.png` | Cambio de cada descriptor textural frente a calidad |
+| `figures/compression_example_grid.png` | Control, JPEG q75/q25/q10 y diferencias absolutas |
+
+### Simulación de reconstrucción
+
+LiTS contiene tomografías ya reconstruidas. Este flujo simula adquisición
+tomográfica desde un corte; no representa un escáner real ni reconstruye datos
+crudos de pacientes. Ejecutar luego de crear la selección:
+
+```bash
+python scripts/run_reconstruction.py --run-id reconstruccion-base
+```
+
+Por defecto toma los primeros tres casos seleccionados y, por caso, los roles
+`largest`, `small` y `tumor_free`. Para selecciones antiguas sin roles, toma
+hasta tres cortes del caso. Convierte HU a `mu=max(HU+1000,0)/1000`, extrae la
+caja hepática con margen y la centra en una matriz cuadrada cuyo lado es al
+menos la diagonal de la caja. Esto coloca toda la caja dentro del círculo
+inscrito requerido por `radon(circle=True)` de scikit-image. Puede usarse
+`reconstruction.downsample` para reducir el tamaño antes de proyectar; luego se
+interpola la reconstrucción al tamaño de la caja original.
+
+La transformación especificada limita HU menores que −1000 a `mu=0`, por lo
+que esos valores no se pueden recuperar exactamente al volver a HU.
+
+Se comparan suma de retroproyecciones, FBP con rampa, FBP con Hann y SART para
+180, 60 y 20 ángulos por defecto. SART itera sobre el sinograma según
+`reconstruction.sart_iterations` y `sart_relaxation`. Cada resultado se pega en
+la imagen original, se pasa por la misma ventana/filtro y configuración de
+segmentación, y se evalúa con Dice/IoU contra `seg == 2` (entrada hepática
+`seg > 0`). PSNR/SSIM comparan el recorte de la caja en escala normalizada de
+ventana HU. La estimación de tiempo se actualiza al procesar cortes y `run.json`
+guarda el tiempo medido.
+
+| Salida | Contenido |
+| --- | --- |
+| `per_slice.csv` | PSNR, SSIM, Dice, IoU y cambio de Dice por corte, método y ángulos |
+| `per_case.csv` | Medias de cortes por caso/método/ángulos |
+| `summary.csv` | Medias y desvíos entre casos |
+| `effective_config.yaml`, `selected_cases_slices.csv`, `run.json` | Configuración, subconjunto y estado/tiempos |
+| `figures/sinogram.png` | Proyecciones de ejemplo |
+| `figures/reconstruction_grid.png` | Original y cuatro métodos para cada cantidad de ángulos |
+| `figures/dice_vs_angles.png` | Dice medio frente al número de ángulos |
+
+Los dos experimentos son descriptivos sobre cortes seleccionados con referencia;
+no son validación independiente. La ejecución de reconstrucción puede ser lenta
+en resolución original, en especial con SART. Las estimaciones Huffman/RLE y
+JPEG codificado teóricas no equivalen a formatos autocontenidos con tablas,
+cabeceras, byte-stuffing o marcadores de final de bloque. La configuración
+`segmentation.stats_scope: case` requiere que el módulo y API `psib.case_stats`
+se integren con `segment_slice`; en su ausencia los experimentos fallan con un
+mensaje claro, en vez de usar silenciosamente estadísticas por corte.
 
 ## 7. API de preprocesamiento
 
@@ -576,12 +710,14 @@ python -m pip check
 | Archivo de tests | Cobertura principal |
 | --- | --- |
 | `test_data_io.py` | Pares NIfTI sintéticos, orientación, espaciado y caso faltante |
-| `test_dataset.py` | Muestreo, volumen físico, componentes y selección reproducible |
+| `test_dataset.py` | Muestreo, contexto HU, tamaños físicos y selección estratificada |
 | `test_preprocessing.py` | Ventana, coordenadas de recorte, forma y dtype de filtros |
 | `test_compare_filters.py` | Parámetros de filtros, orientación, lectura de un corte y errores de selección |
 | `test_metrics.py` | Casos idénticos, disjuntos, vacíos, solapamiento y validación |
 | `test_segmentation.py` | Umbrales, región hepática, morfología, conectividad y contrato |
 | `test_run_segmentation.py` | Ejecución, exportación, agregación, barrido, fallos y reproducibilidad |
+| `test_compression.py` | Huffman, PNG reversible, DCT de calidad alta y tamaño JPEG |
+| `test_reconstruction.py` | Conversión HU/mu, sinograma, FBP, SART y PSNR idéntico |
 | `test_run_tpi.py` | Directorio configurado, fallback, precedencia local, ID temporal y ejecución integrada |
 | `test_slice_io.py` | Lectura por planos, orientación, rango de etiquetas y selección 2D |
 | `test_features.py` | Geometría 2D, espaciado físico y GLCM enmascarada |
