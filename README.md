@@ -119,8 +119,14 @@ figures and CSV tables appear in the **Resultados** list and use the same viewer
 The viewer supports previous/next, fit, 100%, zoom, pan, and overlay / before /
 after display. Pixel coordinates and HU values appear in the bottom status bar.
 
-The GUI can also prepare `selected_cases_slices.csv` from **Caso → Generar
-selección de cortes 2D**, then launch the compression experiment and simulated
+In **Caso**, set **Casos a evaluar** and **Cortes por caso (3–5)**, then use
+**Aplicar y generar selección 2D**. These values also apply when the main 2D
+workflow generates its selection. Cases are chosen reproducibly using the
+configured seed; the case currently shown in the viewer is not forced into the
+batch selection.
+
+The GUI can also prepare `selected_cases_slices.csv` from **Caso → Aplicar y
+generar selección 2D**, then launch the compression experiment and simulated
 reconstruction from **Cuantificación**. Those two experiments require that
 selection file; the GUI explains how to create it if it is missing. Their live
 logs, cancellation, figures, and tables are handled in the same interface.

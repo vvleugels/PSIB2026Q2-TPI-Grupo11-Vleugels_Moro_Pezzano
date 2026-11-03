@@ -1169,7 +1169,12 @@ Ventana
 └── Estado inferior a lo ancho: coordenadas de píxel, HU y estado del proceso
 ```
 
-La sección **Caso** ofrece el selector de casos incluidos en
+La sección **Caso** ofrece campos para definir cuántos casos y cuántos cortes
+por caso (3–5) evaluar; **Aplicar y generar selección 2D** aplica esos valores
+y crea el CSV de selección. El flujo principal también utiliza esos valores y
+la semilla configurada para elegir casos de forma reproducible; el caso que se
+está previsualizando no queda seleccionado automáticamente. La sección ofrece
+además el selector de casos incluidos en
 `selected_cases_slices.csv` (o todos los casos pareados antes de generar esa
 selección), un selector de volumen LiTS, metadatos del caso, navegación axial y
 saltos a cortes seleccionados. **Preprocesamiento** edita ventana HU, filtro,

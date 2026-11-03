@@ -88,6 +88,8 @@ class TpiLauncher:
         self.current_hu = self.current_labels = self.current_prediction = None
         self.current_processed = None
         self.results_files: list[Path] = []
+        self.analysis_case_ids: list[int] = []
+        self.last_selection_signature: tuple | None = None
         self.view_mode = tk.StringVar(value="Overlay")
         self.show_reference = tk.BooleanVar(value=True)
         self.show_prediction = tk.BooleanVar(value=True)
@@ -117,7 +119,7 @@ class TpiLauncher:
         self.status_bar.grid(row=1, column=0, columnspan=2, sticky="ew")
         self.pixel_status = tk.StringVar(value="Píxel: —   HU: —")
         ttk.Label(self.status_bar, textvariable=self.pixel_status, style="StatusBar.TLabel").pack(side="left")
-        self.status = tk.StringVar(value="Listo para ejecutar")
+        self.status = tk.StringVar(value="Seleccioná un caso para empezar")
         self.status_pill = ttk.Frame(self.status_bar, style="StatusReady.TFrame", padding=(8, 3))
         self.status_pill.pack(side="right")
         self.status_dot = ttk.Label(self.status_pill, text="●", style="StatusReady.TLabel")
@@ -129,12 +131,9 @@ class TpiLauncher:
         if self.pending_icon_warning:
             self.append_log(f"Advertencia: {self.pending_icon_warning}")
         self.bind_sidebar_shortcuts()
-        self.load_latest_results()
-        self.load_morphology_results()
         self.refresh_cases()
         self.sidebar_state = saved_sidebar
-        self.show_section(saved_sidebar.active_section, persist=False)
-        self.sidebar_state.collapsed = saved_sidebar.collapsed
+        self.show_section("Caso", persist=False)
         self.apply_sidebar_layout()
         self.root.bind("<Configure>", self.on_window_resize, add="+")
 
@@ -231,11 +230,29 @@ class TpiLauncher:
         row.pack(fill="x", pady=2)
         ttk.Entry(row, textvariable=self.config_path).pack(side="left", fill="x", expand=True)
         ttk.Button(row, text="…", width=3, style="Secondary.TButton", command=self.browse_config).pack(side="left", padx=(4, 0))
-        ttk.Label(parent, text="Caso", style="Body.TLabel").pack(anchor="w", pady=(8, 2))
+        ttk.Label(parent, text="Caso para previsualizar", style="Body.TLabel").pack(anchor="w", pady=(8, 2))
         self.case_var = tk.StringVar()
         self.case_combo = ttk.Combobox(parent, textvariable=self.case_var, state="readonly")
         self.case_combo.pack(fill="x")
         self.case_combo.bind("<<ComboboxSelected>>", lambda _event: self.select_case())
+        ttk.Label(parent, text="Casos para el análisis (Ctrl/Shift para varios)",
+                  style="Body.TLabel").pack(anchor="w", pady=(8, 2))
+        analysis_case_frame = ttk.Frame(parent, style="Panel.TFrame")
+        analysis_case_frame.pack(fill="x")
+        self.analysis_case_list = tk.Listbox(
+            analysis_case_frame, height=5, selectmode="extended", exportselection=False,
+            background="#FFFFFF", foreground="#29405F", selectbackground="#D9E7FA",
+            selectforeground="#20334F", highlightthickness=1, highlightbackground="#D7E0EC",
+            relief="flat", activestyle="none",
+        )
+        analysis_case_scroll = ttk.Scrollbar(analysis_case_frame, orient="vertical",
+                                             command=self.analysis_case_list.yview)
+        self.analysis_case_list.configure(yscrollcommand=analysis_case_scroll.set)
+        self.analysis_case_list.pack(side="left", fill="x", expand=True)
+        analysis_case_scroll.pack(side="right", fill="y")
+        self.analysis_case_list.bind("<<ListboxSelect>>", self.on_analysis_case_select)
+        ttk.Label(parent, text="Sin casos marcados: usa la selección aleatoria con semilla.",
+                  style="Body.TLabel", wraplength=280).pack(fill="x", pady=(2, 0))
         case_actions = ttk.Frame(parent, style="Panel.TFrame")
         case_actions.pack(fill="x", pady=(5, 0))
         ttk.Button(case_actions, text="Abrir volumen LiTS…", style="Secondary.TButton",
@@ -255,9 +272,24 @@ class TpiLauncher:
                    command=self.jump_largest_tumor).pack(fill="x", pady=(7, 3))
         ttk.Button(parent, text="Siguiente corte seleccionado", style="Secondary.TButton",
                    command=self.next_selected_slice).pack(fill="x")
-        self.selection_button = ttk.Button(parent, text="Generar selección de cortes 2D",
+        selection = load_config(DEFAULT_CONFIG).get("selection", {})
+        self.selection_cases_var = tk.StringVar(value=str(selection.get("n_cases", 10)))
+        self.selection_slices_var = tk.StringVar(value=str(selection.get("slices_per_case", 5)))
+        self.selection_controls = ttk.Frame(parent, style="Panel.TFrame")
+        self.selection_controls.pack(fill="x", pady=(9, 2))
+        ttk.Label(self.selection_controls, text="Casos a evaluar", style="Body.TLabel").grid(
+            row=0, column=0, sticky="w", pady=2)
+        self.case_count_spin = ttk.Spinbox(self.selection_controls, from_=1, to=131, width=6, textvariable=self.selection_cases_var)
+        self.case_count_spin.grid(row=0, column=1, sticky="e", padx=(6, 0), pady=2)
+        ttk.Label(self.selection_controls, text="Cortes por caso (3–5)", style="Body.TLabel").grid(
+            row=1, column=0, sticky="w", pady=2)
+        self.slices_count_spin = ttk.Spinbox(self.selection_controls, from_=3, to=5, width=6,
+                                             textvariable=self.selection_slices_var)
+        self.slices_count_spin.grid(row=1, column=1, sticky="e", padx=(6, 0), pady=2)
+        self.selection_controls.columnconfigure(0, weight=1)
+        self.selection_button = ttk.Button(parent, text="Aplicar y generar selección 2D",
                                            style="Secondary.TButton", command=self.run_slice_selection)
-        self.selection_button.pack(fill="x", pady=(8, 3))
+        self.selection_button.pack(fill="x", pady=(3, 3))
 
     def build_preprocessing_section(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Preprocesamiento", style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 8))
@@ -474,21 +506,60 @@ class TpiLauncher:
         try:
             config = load_config(self.config_path.get())
             cases = list_cases(self.external_data_dir if getattr(self, "external_data_dir", None) else config["data_dir"])
-            selected_path = Path(config["_output_dir"]) / "selected_cases_slices.csv"
-            if selected_path.is_file():
-                with selected_path.open(newline="", encoding="utf-8") as stream:
-                    selected_cases = sorted({int(row["case_id"]) for row in csv.DictReader(stream)})
-                if selected_cases:
-                    cases = [case for case in cases if case in selected_cases]
+            available_case_count = len(cases)
+            if hasattr(self, "case_count_spin"):
+                self.case_count_spin.configure(to=max(1, available_case_count))
+                try:
+                    requested = int(self.selection_cases_var.get())
+                except ValueError:
+                    requested = 1
+                if requested > available_case_count > 0:
+                    self.selection_cases_var.set(str(available_case_count))
         except Exception as exc:
             cases = []
             self.case_info.set(f"No se pudo leer la base: {exc}")
         self.case_combo["values"] = [f"{case:03d}" for case in cases]
+        if hasattr(self, "analysis_case_list"):
+            available_ids = set(cases)
+            self.analysis_case_ids = [case_id for case_id in self.analysis_case_ids
+                                      if case_id in available_ids]
+            self.analysis_case_list.delete(0, tk.END)
+            for index, case_id in enumerate(cases):
+                self.analysis_case_list.insert(tk.END, f"{case_id:03d}")
+                if case_id in self.analysis_case_ids:
+                    self.analysis_case_list.selection_set(index)
+            if self.analysis_case_ids:
+                self.selection_cases_var.set(str(len(self.analysis_case_ids)))
+                self.case_count_spin.configure(state="disabled")
+            else:
+                self.case_count_spin.configure(state="normal")
         if not self.case_var.get():
             self.case_info.set(
                 f"{len(cases)} casos disponibles. Elegí un caso para cargar su volumen y etiquetas."
                 if cases else "No se encontraron casos disponibles."
             )
+
+    def on_analysis_case_select(self, _event=None) -> None:
+        """Use the explicitly highlighted cases instead of the seeded sample."""
+        self.analysis_case_ids = [
+            int(self.analysis_case_list.get(index))
+            for index in self.analysis_case_list.curselection()
+        ]
+        if self.analysis_case_ids:
+            self.selection_cases_var.set(str(len(self.analysis_case_ids)))
+            self.case_count_spin.configure(state="disabled")
+        else:
+            self.case_count_spin.configure(state="normal")
+
+    def current_selection_signature(self) -> tuple:
+        """Describe the data and case/slice choices used to create a selection."""
+        config = load_config(self.config_path.get())
+        case_ids = tuple(self.analysis_case_ids)
+        n_cases = len(case_ids) if case_ids else int(self.selection_cases_var.get())
+        seed = int(config.get("selection", {}).get("seed", 2026))
+        data_dir = getattr(self, "external_data_dir", None) or config["data_dir"]
+        return (str(Path(data_dir).resolve()), case_ids, n_cases,
+                int(self.selection_slices_var.get()), seed)
 
     def browse_volume(self) -> None:
         selected = filedialog.askopenfilename(title="Elegir volumen LiTS",
@@ -566,6 +637,20 @@ class TpiLauncher:
 
     def current_settings(self) -> tuple[dict, dict]:
         config = load_config(self.config_path.get())
+        selection = config.setdefault("selection", {})
+        n_cases = int(self.selection_cases_var.get())
+        slices_per_case = int(self.selection_slices_var.get())
+        if n_cases < 1:
+            raise ValueError("La cantidad de casos debe ser al menos 1.")
+        if not 3 <= slices_per_case <= 5:
+            raise ValueError("La cantidad de cortes por caso debe estar entre 3 y 5.")
+        selection["n_cases"] = n_cases
+        selection["slices_per_case"] = slices_per_case
+        if self.analysis_case_ids:
+            selection["case_ids"] = list(self.analysis_case_ids)
+            selection["n_cases"] = len(self.analysis_case_ids)
+        else:
+            selection.pop("case_ids", None)
         prep = config.setdefault("preprocessing", {})
         prep.setdefault("hu_window", {}).update(center=float(self.preprocessing_vars["center"].get()),
                                                   width=float(self.preprocessing_vars["width"].get()))
@@ -789,7 +874,8 @@ class TpiLauncher:
         self.figure_canvas.bind("<B1-Motion>", lambda event: self.figure_canvas.scan_dragto(event.x, event.y, gain=1))
         self.figure_canvas.bind("<MouseWheel>", self.on_figure_wheel)
         self.figure_canvas.bind("<Motion>", self.pixel_readout)
-        self.show_figure_message("Elegí un caso o ejecutá el flujo para ver imágenes aquí")
+        self.show_figure_message(
+            "Seleccioná un caso para previsualizarlo, o definí cuántos casos y cortes evaluar para comenzar.")
 
     def build_log(self, parent: ttk.Frame) -> None:
         surface = ttk.Frame(parent, style="Log.TFrame", padding=1)
@@ -1098,8 +1184,28 @@ class TpiLauncher:
         if selected:
             self.config_path.set(selected)
             self.external_data_dir = None
+            self.analysis_case_ids = []
+            self.last_selection_signature = None
+            try:
+                selection = load_config(selected).get("selection", {})
+                self.selection_cases_var.set(str(selection.get("n_cases", 10)))
+                self.selection_slices_var.set(str(selection.get("slices_per_case", 5)))
+            except Exception as exc:
+                messagebox.showerror("Configuración inválida", str(exc))
+                return
             self.refresh_cases()
-            self.load_latest_results()
+            self.reset_results_view("Seleccioná un caso para empezar una nueva sesión.")
+
+    def reset_results_view(self, message: str) -> None:
+        """Clear displayed results without deleting prior files from disk."""
+        self.results_dir = None
+        self.figures = []
+        self.results_files = []
+        for item in self.results_tree.get_children():
+            self.results_tree.delete(item)
+        for item in self.morphology_table.get_children():
+            self.morphology_table.delete(item)
+        self.show_figure_message(message)
 
     def append_log(self, line: str) -> None:
         tag = None
@@ -1186,6 +1292,14 @@ class TpiLauncher:
         self.start_experiment("run_reconstruction.py", "reconstruction", "Reconstrucción simulada…")
 
     def start_experiment(self, script: str, kind: str, label: str) -> None:
+        try:
+            if self.last_selection_signature != self.current_selection_signature():
+                messagebox.showinfo("Generá la selección actual",
+                                    "Primero aplicá y generá la selección para los casos y cortes elegidos.")
+                return
+        except Exception as exc:
+            messagebox.showerror("Configuración inválida", str(exc))
+            return
         try:
             cfg = load_config(self.config_path.get())
             selection = Path(cfg["_output_dir"]) / "selected_cases_slices.csv"
@@ -1332,8 +1446,25 @@ class TpiLauncher:
                 if int(code) == 0:
                     if task == "selection":
                         self.refresh_cases()
-                        self.log_meta.set("SELECCIÓN 2D LISTA")
-                        self.set_status("Selección de cortes lista", "success")
+                        try:
+                            cfg = load_config(self.config_path.get())
+                            selection_path = Path(cfg["_output_dir"]) / "selected_cases_slices.csv"
+                            with selection_path.open(newline="", encoding="utf-8") as stream:
+                                rows = list(csv.DictReader(stream))
+                            self.last_selection_signature = self.current_selection_signature()
+                            case_count = len({row["case_id"] for row in rows})
+                            requested = (int(self.selection_cases_var.get())
+                                         * int(self.selection_slices_var.get()))
+                            message = f"Selección generada: {case_count} casos, {len(rows)} cortes"
+                            self.append_log(message)
+                            complete = len(rows) >= requested
+                            self.log_meta.set("SELECCIÓN 2D LISTA" if complete else "SELECCIÓN 2D INCOMPLETA")
+                            self.set_status(message, "success" if complete else "error")
+                            if not complete:
+                                self.append_log(f"Se solicitaron {requested} cortes; revisá las advertencias de selección por caso.")
+                        except (OSError, ValueError, KeyError) as exc:
+                            self.append_log(f"No se pudo resumir la selección generada: {exc}")
+                            self.set_status("Selección generada; no se pudo leer su resumen", "error")
                     elif result_dir and result_dir.is_dir():
                         self.results_dir = result_dir
                         self.refresh_results_list()
@@ -1381,6 +1512,7 @@ class TpiLauncher:
             elif kind == "done":
                 code = int(value)
                 if code == 0:
+                    self.last_selection_signature = self.current_selection_signature()
                     count = self.load_run_figures(self.results_dir) if self.results_dir else 0
                     self.log_meta.set("CORRIDA FINALIZADA")
                     if count:

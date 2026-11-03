@@ -256,6 +256,32 @@ def select_slice_records(slice_stats, n_slices: int, spacing_z_mm: float, *,
             shortages.append(f"{role} role unavailable under tumor-area and {minimum_gap_mm:g} mm gap criteria")
             continue
         chosen.append({**picked, "slice_role": role})
+
+    # A randomly selected labeled case can contain no tumor (or too few
+    # eligible tumor slices). Fill missing slots with liver-containing slices
+    # when the requested count can still be met at the configured physical
+    # spacing. This prevents a one-case run from silently producing only one
+    # figure just because tumor-specific roles were unavailable.
+    needed = n_slices - len(chosen)
+    if needed > 0:
+        selected_indices = {row["slice_index"] for row in chosen}
+        fallback_candidates = sorted(
+            (row for row in rows if row["liver_area_px"] > 0
+             and row["slice_index"] not in selected_indices
+             and all(abs(row["slice_index"] - other["slice_index"]) * spacing_z_mm
+                     >= minimum_gap_mm - 1e-9 for other in chosen)),
+            key=lambda row: row["slice_index"],
+        )
+        fallback: list[dict] = []
+        for row in fallback_candidates:
+            if all(abs(row["slice_index"] - other["slice_index"]) * spacing_z_mm
+                   >= minimum_gap_mm - 1e-9 for other in fallback):
+                fallback.append({**row, "slice_role": "fallback_liver"})
+                if len(fallback) == needed:
+                    break
+        if len(fallback) == needed:
+            chosen.extend(fallback)
+
     if len(chosen) < n_slices:
         shortages.append(f"requested {n_slices} slices, selected {len(chosen)}")
     return sorted(chosen, key=lambda r: r["slice_index"]), shortages

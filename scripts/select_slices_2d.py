@@ -28,9 +28,27 @@ def select_2d(config_path):
     min_tumor = int(settings.get('min_tumor_pixels', 20))
     legacy_gap = int(settings.get('minimum_slice_gap', 2))
     seed = int(settings.get('seed', 2026))
-    if not 1 <= n_cases <= len(available) or not 3 <= n_slices <= 5:
+    requested_ids = settings.get('case_ids')
+    if not 3 <= n_slices <= 5:
         raise ValueError('Revisar n_cases y slices_per_case (3 a 5).')
-    chosen = sorted(np.random.default_rng(seed).choice(available, n_cases, replace=False).tolist())
+    if requested_ids is None:
+        if not 1 <= n_cases <= len(available):
+            raise ValueError('n_cases debe estar entre 1 y la cantidad de casos disponibles.')
+        chosen = sorted(np.random.default_rng(seed).choice(available, n_cases, replace=False).tolist())
+        case_selection = 'seeded random sample'
+    else:
+        if (not isinstance(requested_ids, list) or not requested_ids
+                or any(isinstance(case_id, bool) or not isinstance(case_id, int) or case_id < 0
+                       for case_id in requested_ids)):
+            raise ValueError('case_ids debe ser una lista no vacía de identificadores enteros no negativos.')
+        if len(set(requested_ids)) != len(requested_ids):
+            raise ValueError('case_ids no puede contener identificadores duplicados.')
+        unavailable = sorted(set(requested_ids) - set(available))
+        if unavailable:
+            raise ValueError(f'Los casos solicitados no están disponibles en data_dir: {unavailable}.')
+        chosen = list(requested_ids)
+        n_cases = len(chosen)
+        case_selection = 'explicitly selected case IDs'
     rows = []
     for rank, case_id in enumerate(chosen, 1):
         areas = []
@@ -45,7 +63,7 @@ def select_2d(config_path):
             warnings.warn(f'Case {case_id}: ' + '; '.join(shortages), RuntimeWarning)
         gap_description = (f'minimum index gap={legacy_gap}' if strategy == 'area_top'
                            else f'minimum gap={gap_mm:g} mm')
-        criteria = (f'2D-only reference selection; seeded cases; strategy={strategy}; '
+        criteria = (f'2D-only reference selection; {case_selection}; strategy={strategy}; '
                     f'{gap_description}; min_tumor_pixels={min_tumor}; '
                     + ('shortage: ' + '; '.join(shortages) if shortages else 'all requested roles filled'))
         for row in selected:
