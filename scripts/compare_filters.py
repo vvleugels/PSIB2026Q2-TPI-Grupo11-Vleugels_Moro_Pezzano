@@ -1,4 +1,4 @@
-"""Compare denoising filters on the first selected CT slice and save a figure."""
+"""Compare bilateral, Gaussian, and mean denoising on the first selected slice."""
 from __future__ import annotations
 
 import argparse
@@ -19,7 +19,7 @@ from psib.preprocessing import apply_hu_window, denoise
 
 
 def compare_filters(config_path: str | Path = ROOT / "config.yaml") -> Path:
-    """Save windowed, median, Gaussian, and bilateral views of one selected slice."""
+    """Save windowed, bilateral, Gaussian, and mean views of one selected slice."""
     cfg = load_config(config_path)
     selection_path = Path(cfg["_output_dir"]) / "selected_cases_slices.csv"
     if not selection_path.is_file():
@@ -44,15 +44,14 @@ def compare_filters(config_path: str | Path = ROOT / "config.yaml") -> Path:
     filters = settings.get("denoising", {})
     images = [windowed] + [
         denoise(windowed, {**filters, "method": method})
-        for method in ("median", "gaussian", "bilateral")
+        for method in ("bilateral", "gaussian", "mean")
     ]
     titles = (
-        f"HU window\ncenter={center:g}, width={width:g}",
-        f"Median\nsize={int(filters.get('median_size', 3))}",
-        f"Gaussian\nsigma={float(filters.get('gaussian_sigma', 1.0)):g}",
-        "Bilateral\n"
-        f"color={float(filters.get('bilateral_sigma_color', 0.08)):g}, "
-        f"spatial={float(filters.get('bilateral_sigma_spatial', 3.0)):g}",
+        f"No denoising (HU window)\ncenter={center:g}, width={width:g}",
+        f"Bilateral\nσ color={float(filters.get('bilateral_sigma_color', 0.08)):g}, "
+        f"σ spatial={float(filters.get('bilateral_sigma_spatial', 3.0)):g}",
+        f"Gaussian\nsigma={float(filters.get('gaussian_sigma', 0.3)):g}",
+        f"Mean\nsize={int(filters.get('mean_size', 3))}",
     )
     output = Path(cfg["_output_dir"]) / "figures" / (
         f"filter_comparison_case_{case_id:03d}_slice_{slice_index:03d}.png"

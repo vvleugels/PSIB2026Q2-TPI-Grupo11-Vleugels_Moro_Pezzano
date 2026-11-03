@@ -31,25 +31,46 @@ def denoise_gaussian(image: np.ndarray, sigma: float = 1.0) -> np.ndarray:
     return ndimage.gaussian_filter(np.asarray(image, dtype=np.float32), sigma=sigma).astype(np.float32)
 
 
-def denoise_bilateral(image: np.ndarray, sigma_color: float = 0.08, sigma_spatial: float = 3.0) -> np.ndarray:
+def denoise_mean(image: np.ndarray, size: int = 3) -> np.ndarray:
+    """Apply a 2D arithmetic-mean filter with an odd window size."""
+    if size < 1 or size % 2 == 0:
+        raise ValueError("Mean filter size must be a positive odd integer")
+    return ndimage.uniform_filter(np.asarray(image, dtype=np.float32), size=size).astype(np.float32)
+
+
+def denoise_bilateral(image: np.ndarray, sigma_color: float = 0.08,
+                      sigma_spatial: float = 3.0) -> np.ndarray:
     """Apply edge-preserving bilateral denoising to a [0, 1] image."""
+    if not np.isfinite(sigma_color) or sigma_color <= 0:
+        raise ValueError("Bilateral sigma_color must be finite and positive")
+    if not np.isfinite(sigma_spatial) or sigma_spatial <= 0:
+        raise ValueError("Bilateral sigma_spatial must be finite and positive")
     source = np.asarray(image, dtype=np.float32)
-    result = restoration.denoise_bilateral(source, sigma_color=sigma_color,
-                                           sigma_spatial=sigma_spatial, channel_axis=None)
+    result = restoration.denoise_bilateral(
+        source, sigma_color=sigma_color, sigma_spatial=sigma_spatial, channel_axis=None)
     return np.asarray(result, dtype=np.float32)
 
 
 def denoise(image: np.ndarray, settings: Mapping[str, Any]) -> np.ndarray:
-    """Dispatch the configured median, Gaussian, or bilateral filter."""
-    method = str(settings.get("method", "median")).lower()
+    """Dispatch the configured bilateral, Gaussian, or mean filter.
+
+    Median remains accepted for old saved configuration files, but is no
+    longer offered as a GUI or default configuration option.
+    """
+    method = str(settings.get("method", "gaussian")).lower()
+    if method == "none":
+        return np.asarray(image, dtype=np.float32).copy()
+    if method == "bilateral":
+        return denoise_bilateral(
+            image, float(settings.get("bilateral_sigma_color", 0.08)),
+            float(settings.get("bilateral_sigma_spatial", 3.0)))
     if method == "median":
         return denoise_median(image, int(settings.get("median_size", 3)))
     if method == "gaussian":
-        return denoise_gaussian(image, float(settings.get("gaussian_sigma", 1.0)))
-    if method == "bilateral":
-        return denoise_bilateral(image, float(settings.get("bilateral_sigma_color", 0.08)),
-                                 float(settings.get("bilateral_sigma_spatial", 3.0)))
-    raise ValueError(f"Unknown denoising method {method!r}; use median, gaussian, or bilateral")
+        return denoise_gaussian(image, float(settings.get("gaussian_sigma", 0.3)))
+    if method == "mean":
+        return denoise_mean(image, int(settings.get("mean_size", 3)))
+    raise ValueError(f"Unknown denoising method {method!r}; use none, bilateral, gaussian, or mean")
 
 
 def prepare_denoised_slice(slice_hu: np.ndarray, cfg: Mapping[str, Any]) -> np.ndarray:
@@ -65,7 +86,7 @@ def prepare_denoised_slice(slice_hu: np.ndarray, cfg: Mapping[str, Any]) -> np.n
 def enhance(image: np.ndarray, settings: Mapping[str, Any]) -> np.ndarray:
     """Apply optional histogram equalization or CLAHE; 'none' returns a copy."""
     source = np.asarray(image, dtype=np.float32)
-    method = str(settings.get("method", "none")).lower()
+    method = str(settings.get("method", "clahe")).lower()
     if method == "none":
         return source.copy()
     if method == "histogram_equalization":

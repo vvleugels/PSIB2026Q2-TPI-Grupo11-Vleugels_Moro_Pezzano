@@ -49,7 +49,8 @@ class RunSegmentationTests(unittest.TestCase):
         self.assertAlmostEqual(per_case.iou, 13 / 17)
         self.assertNotAlmostEqual(per_case.dice, per_slice.dice.mean())
         self.assertEqual(per_slice.iloc[2].dice, 1.0)
-        masks = sorted((first / 'predictions').rglob('*.npy'))
+        masks = sorted(path for path in (first / 'predictions').rglob('*.npy')
+                       if not path.stem.endswith(('_watershed', '_sharpened')))
         self.assertEqual(len(masks), 3)
         self.assertEqual(len(list((first / 'predictions').rglob('*.png'))), 3)
         for path in masks:
@@ -81,8 +82,8 @@ class RunSegmentationTests(unittest.TestCase):
 
     def test_sweep_keeps_all_metrics_and_exports_winners(self):
         self.save_selection(self.selected.iloc[[0, 2]])
-        # Keep real segmentation and NIfTI I/O; avoid rendering 12 redundant test PNGs.
-        with patch('scripts.run_segmentation.export_prediction') as export:
+        # Keep real segmentation and NIfTI I/O; avoid rendering comparison PNGs.
+        with patch('scripts.run_segmentation.export_slice_comparison') as export:
             out = run_experiment(self.config, 'sweep', True)
             self.assertEqual(export.call_count, 6)
         slices = pd.read_csv(out / 'metrics_per_slice.csv')
@@ -142,7 +143,7 @@ class RunSegmentationTests(unittest.TestCase):
                 run_experiment(self.config, run_id)
 
     def test_export_failure_does_not_mark_complete(self):
-        with patch('scripts.run_segmentation.export_prediction', side_effect=OSError('disk error')):
+        with patch('scripts.run_segmentation.export_slice_comparison', side_effect=OSError('disk error')):
             with self.assertRaisesRegex(RuntimeError, 'caso 1, corte 0'):
                 run_experiment(self.config, 'export_failure')
         state = json.loads((self.output / 'segmentation/export_failure/run.json').read_text())

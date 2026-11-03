@@ -298,19 +298,36 @@ class TpiLauncher:
         window = prep.get("hu_window", {})
         denoise = prep.get("denoising", {})
         enhancement = prep.get("enhancement", {})
+        edge_settings = cfg.get("edge_analysis", {})
+        denoise_method = str(denoise.get("method", "gaussian"))
+        if denoise_method == "median":
+            denoise_method = "bilateral"
+        parameter_keys = {"bilateral": "bilateral_sigma_color", "gaussian": "gaussian_sigma",
+                          "mean": "mean_size"}
+        parameter_defaults = {"bilateral": 0.08, "gaussian": 0.3, "mean": 3}
+        parameter_key = parameter_keys.get(denoise_method, "bilateral_sigma_color")
+        parameter_default = parameter_defaults.get(denoise_method, 0.08)
         self.preprocessing_vars = {
             "center": tk.StringVar(value=str(window.get("center", 60))),
             "width": tk.StringVar(value=str(window.get("width", 400))),
-            "denoising": tk.StringVar(value=str(denoise.get("method", "median"))),
-            "parameter": tk.StringVar(value=str(denoise.get("median_size", 3))),
-            "equalization": tk.StringVar(value=str(enhancement.get("method", "none"))),
+            "denoising": tk.StringVar(value=denoise_method),
+            "parameter": tk.StringVar(value=str(denoise.get(parameter_key, parameter_default))),
+            "bilateral_sigma_spatial": tk.StringVar(
+                value=str(denoise.get("bilateral_sigma_spatial", 3.0))),
+            "sharpen_alpha": tk.StringVar(value=str(edge_settings.get("sharpen_alpha", 0.5))),
+            "edge_operator": tk.StringVar(value=str(edge_settings.get("operator", "sobel"))),
+            "equalization": tk.StringVar(value=str(enhancement.get("method", "clahe"))),
             "crop": tk.BooleanVar(value=True),
         }
         self.labeled_entry(parent, "Centro de ventana (HU)", self.preprocessing_vars["center"])
         self.labeled_entry(parent, "Ancho de ventana (HU)", self.preprocessing_vars["width"])
         self.labeled_combo(parent, "Denoising", self.preprocessing_vars["denoising"],
-                           ("median", "gaussian", "bilateral"))
-        self.labeled_entry(parent, "Parámetro del filtro", self.preprocessing_vars["parameter"])
+                           ("none", "bilateral", "gaussian", "mean"))
+        self.labeled_entry(parent, "Parámetro (tamaño o σ color)", self.preprocessing_vars["parameter"])
+        self.labeled_entry(parent, "σ espacial bilateral", self.preprocessing_vars["bilateral_sigma_spatial"])
+        self.labeled_combo(parent, "Filtro de bordes (uno a la vez)",
+                           self.preprocessing_vars["edge_operator"], ("none", "sobel", "prewitt", "laplace"))
+        self.labeled_entry(parent, "α realce Laplaciano (solo Laplace)", self.preprocessing_vars["sharpen_alpha"])
         self.labeled_combo(parent, "Ecualización", self.preprocessing_vars["equalization"],
                            ("none", "histogram_equalization", "clahe"))
         ttk.Checkbutton(parent, text="Recortar a hígado (visualización)", variable=self.preprocessing_vars["crop"]).pack(anchor="w", pady=6)
@@ -656,9 +673,23 @@ class TpiLauncher:
                                                   width=float(self.preprocessing_vars["width"].get()))
         method = self.preprocessing_vars["denoising"].get()
         denoise = {"method": method}
-        denoise[{"median": "median_size", "gaussian": "gaussian_sigma", "bilateral": "bilateral_sigma_color"}[method]] = float(self.preprocessing_vars["parameter"].get())
+        if method != "none":
+            parameter = float(self.preprocessing_vars["parameter"].get())
+            parameter_key = {"bilateral": "bilateral_sigma_color", "gaussian": "gaussian_sigma",
+                             "mean": "mean_size"}[method]
+            if method == "mean":
+                if not parameter.is_integer():
+                    raise ValueError("El tamaño del filtro de media debe ser un número entero.")
+                parameter = int(parameter)
+            denoise[parameter_key] = parameter
+        if method == "bilateral":
+            denoise["bilateral_sigma_spatial"] = float(
+                self.preprocessing_vars["bilateral_sigma_spatial"].get())
         prep["denoising"] = denoise
         prep.setdefault("enhancement", {})["method"] = self.preprocessing_vars["equalization"].get()
+        config.setdefault("edge_analysis", {})["sharpen_alpha"] = float(
+            self.preprocessing_vars["sharpen_alpha"].get())
+        config.setdefault("edge_analysis", {})["operator"] = self.preprocessing_vars["edge_operator"].get()
         segment = {key: var.get() for key, var in self.segmentation_vars.items()}
         segment["threshold"] = float(segment["threshold"])
         segment["k"] = float(segment["k"])
@@ -1190,6 +1221,12 @@ class TpiLauncher:
                 selection = load_config(selected).get("selection", {})
                 self.selection_cases_var.set(str(selection.get("n_cases", 10)))
                 self.selection_slices_var.set(str(selection.get("slices_per_case", 5)))
+                edge_settings = load_config(selected).get("edge_analysis", {})
+                operator = str(edge_settings.get("operator", "sobel")).lower()
+                if operator in ("none", "sobel", "prewitt", "laplace"):
+                    self.preprocessing_vars["edge_operator"].set(operator)
+                self.preprocessing_vars["sharpen_alpha"].set(
+                    str(edge_settings.get("sharpen_alpha", 0.5)))
             except Exception as exc:
                 messagebox.showerror("Configuración inválida", str(exc))
                 return

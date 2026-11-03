@@ -10,8 +10,8 @@ import pandas as pd
 import yaml
 
 from scripts import compare_filters as comparison
-from psib.preprocessing import (apply_hu_window, denoise_bilateral,
-                                denoise_gaussian, denoise_median)
+from psib.preprocessing import (apply_hu_window, denoise_bilateral, denoise_gaussian,
+                                denoise_mean)
 
 
 class CompareFiltersTests(unittest.TestCase):
@@ -28,9 +28,9 @@ class CompareFiltersTests(unittest.TestCase):
             "data_dir": ".", "output_dir": "results",
             "preprocessing": {
                 "hu_window": {"center": 40, "width": 200},
-                "denoising": {"method": "gaussian", "median_size": 5,
-                              "gaussian_sigma": 2.0, "bilateral_sigma_color": 0.15,
-                              "bilateral_sigma_spatial": 2.0},
+                "denoising": {"method": "gaussian", "bilateral_sigma_color": 0.15,
+                              "bilateral_sigma_spatial": 2.0,
+                              "gaussian_sigma": 2.0, "mean_size": 3},
             },
         }
         (self.root / "config.local.yaml").write_text(yaml.safe_dump(settings))
@@ -47,8 +47,8 @@ class CompareFiltersTests(unittest.TestCase):
 
     def test_configured_filters_orientation_and_bounded_read(self):
         windowed = apply_hu_window(self.ct[::-1, :, 1], 40, 200)
-        expected = [windowed, denoise_median(windowed, 5),
-                    denoise_gaussian(windowed, 2.0), denoise_bilateral(windowed, 0.15, 2.0)]
+        expected = [windowed, denoise_bilateral(windowed, 0.15, 2.0),
+                    denoise_gaussian(windowed, 2.0), denoise_mean(windowed, 3)]
         close = comparison.plt.close
         try:
             with patch.object(nib.Nifti1Image, "get_fdata", side_effect=AssertionError("Full volume read")), \

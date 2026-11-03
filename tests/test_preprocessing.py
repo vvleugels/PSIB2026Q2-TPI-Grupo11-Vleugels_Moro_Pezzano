@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 from psib.preprocessing import (apply_hu_window, crop_to_liver, denoise_bilateral,
-                                denoise_gaussian, denoise_median, liver_bounding_box)
+                                denoise_gaussian, denoise_mean, liver_bounding_box)
 
 
 class PreprocessingTests(unittest.TestCase):
@@ -25,7 +25,7 @@ class PreprocessingTests(unittest.TestCase):
 
     def test_filters_preserve_shape_and_float_dtype(self):
         image = np.random.default_rng(2).random((12, 13), dtype=np.float32)
-        for result in (denoise_median(image), denoise_gaussian(image), denoise_bilateral(image)):
+        for result in (denoise_bilateral(image), denoise_gaussian(image), denoise_mean(image)):
             self.assertEqual(result.shape, image.shape)
             self.assertEqual(result.dtype, np.float32)
 
