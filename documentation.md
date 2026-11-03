@@ -76,7 +76,8 @@ cortes seleccionados.
 | `src/psib/config.py` | Lectura del YAML, precedencia local y resolución de rutas |
 | `src/psib/data_io.py` | Descubrimiento, orientación, carga por volumen y lector por cortes |
 | `src/psib/dataset.py` | Inventario, terciles de volumen tumoral y selección |
-| `src/psib/preprocessing.py` | Ventana HU, filtros, realce y recorte hepático |
+| `src/psib/preprocessing.py` | Ventana HU, ecualización, filtros y recorte hepático |
+| `src/psib/edge_analysis.py` | Sobel/Prewitt/Laplaciano, realce Laplaciano y refinamiento watershed |
 | `src/psib/segmentation.py` | Umbrales 2D, morfología y componentes conectados |
 | `src/psib/metrics.py` | Dice e IoU entre máscaras binarias |
 | `src/psib/features.py` | Geometría y textura GLCM 2D, con entropía y ASM |
@@ -97,7 +98,7 @@ cortes seleccionados.
 | `scripts/run_compression.py` | Comparación de compresión y segmentación por corte |
 | `scripts/run_reconstruction.py` | Simulación tomográfica y comparación de métodos |
 | `scripts/check_requirements.py` | Verificación de dependencias directas del lanzador |
-| `scripts/compare_filters.py` | Comparación de mediana, gaussiano y bilateral |
+| `scripts/compare_filters.py` | Comparación de bilateral, gaussiano y media después de la ecualización |
 | `scripts/explore_dataset.py` | Inventario volumétrico y figuras de contexto |
 | `scripts/analyze_morphology_3d.py` | CSV y superficies 3D de los casos seleccionados |
 | `src/psib/gui_model.py` | Estado de sidebar y persistencia del perfil, sin dependencias Tk |
@@ -171,6 +172,18 @@ La barra de estado inferior presenta coordenadas y HU. El perfil se conserva en
 `.psib_gui/`, ignorado por Git. El pipeline y la morfología corren en segundo
 plano; los controles visibles se guardan en un YAML local ignorado por Git para
 que el pipeline use la misma configuración.
+
+El preset inicial es ventana HU (centro 30, ancho 150), CLAHE, filtro gaussiano
+de baja frecuencia (`sigma=0.3`) y Sobel de alta frecuencia. El orden aplicado
+en la vista previa y en la segmentación por lote es: ventana HU → ecualización
+→ filtro de baja frecuencia → filtro de alta frecuencia. Se puede elegir
+`none`, bilateral, gaussiano o media para denoising; `none`, ecualización de
+histograma o CLAHE para ecualización; y `none`, Sobel, Prewitt o Laplaciano
+para el filtro de bordes. Cada PNG de segmentación usa una grilla 2×3 con el
+original (con ventana HU), la imagen procesada, la referencia y la predicción;
+cuando corresponde, agrega la respuesta del filtro. Sobel añade las etiquetas
+watershed y la máscara refinada; con el filtro de bordes en `none` no se ejecuta
+watershed ni realce.
 
 La selección 2D y la segmentación base comparten la configuración resuelta.
 El identificador usa la hora local con formato `YYYYMMDD-HHMMSS`; las salidas
@@ -279,17 +292,19 @@ Valores del YAML base:
 | `reconstruction.downsample` | 1 | Factor entero opcional de reducción para acelerar |
 | `reconstruction.sart_iterations` | 3 | Iteraciones SART por corte y número de ángulos |
 | `reconstruction.sart_relaxation` | 0.15 | Relajación de SART |
-| `preprocessing.hu_window.center` | 60 | Centro HU |
-| `preprocessing.hu_window.width` | 400 | Ancho HU |
-| `preprocessing.denoising.method` | `median` | Filtro activo |
-| `preprocessing.denoising.median_size` | 3 | Ventana mediana impar |
-| `preprocessing.denoising.gaussian_sigma` | 1.0 | Sigma gaussiano en píxeles |
-| `preprocessing.denoising.bilateral_sigma_color` | 0.08 | Escala de intensidad normalizada |
-| `preprocessing.denoising.bilateral_sigma_spatial` | 3.0 | Escala espacial del bilateral |
-| `preprocessing.enhancement.method` | `none` | Realce desactivado |
+| `preprocessing.hu_window.center` | 30 | Centro HU |
+| `preprocessing.hu_window.width` | 150 | Ancho HU |
+| `preprocessing.denoising.method` | `gaussian` | Filtro activo |
+| `preprocessing.denoising.gaussian_sigma` | 0.3 | Sigma gaussiano en píxeles |
+| `preprocessing.denoising.bilateral_sigma_color` | 0.08 | Sigma de intensidad normalizada al elegir bilateral |
+| `preprocessing.denoising.bilateral_sigma_spatial` | 3.0 | Sigma espacial al elegir bilateral |
+| `preprocessing.denoising.mean_size` | 3 | Ventana impar del filtro de media |
+| `preprocessing.enhancement.method` | `clahe` | Ecualización activa |
 | `preprocessing.enhancement.clahe_clip_limit` | 0.01 | Límite de CLAHE |
 | `preprocessing.enhancement.clahe_kernel_size` | 8 | Tamaño de región CLAHE |
 | `preprocessing.crop_margin` | 8 | Margen del recorte en píxeles |
+| `edge_analysis.operator` | `sobel` | Filtro de alta frecuencia activo; admite `none`, `sobel`, `prewitt`, `laplace` |
+| `edge_analysis.sharpen_alpha` | 0.5 | Ganancia para el realce Laplaciano |
 
 El bloque `segmentation` contiene los valores de la sección 8. Admiten
 `--config`: `run_tpi.py`, `select_slices_2d.py`, `run_segmentation.py`,
@@ -526,31 +541,34 @@ mensaje claro, en vez de usar silenciosamente estadísticas por corte.
 ## 7. API de preprocesamiento
 
 `preprocess_slice(slice_hu, liver_mask, cfg)` acepta la configuración completa
-o directamente el bloque de preprocesamiento y devuelve:
+o directamente el bloque de preprocesamiento y aplica ventana HU, ecualización,
+filtro de baja frecuencia y recorte, en ese orden. Devuelve:
 
 | Clave | Contenido |
 | --- | --- |
 | `windowed` | Imagen recortada a la ventana HU y normalizada en `[0,1]` |
-| `denoised` | Imagen completa filtrada |
-| `enhanced` | Imagen completa con realce opcional |
-| `cropped` | Recorte de `enhanced` alrededor del hígado |
+| `enhanced` | Imagen completa después de la ecualización |
+| `denoised` | Imagen completa ecualizada y filtrada en baja frecuencia |
+| `cropped` | Recorte de `denoised` alrededor del hígado |
 | `crop_box` | Límites `(x0, y0, x1, y1)`, con extremos superiores exclusivos |
 
-La ventana actual cubre `[-140, 260] HU`. Se admiten filtros `median`,
-`gaussian` y `bilateral`; el realce admite `none`, `histogram_equalization`
+La ventana actual cubre `[-45, 105] HU`. Se admiten filtros `none`, `bilateral`,
+`gaussian` y `mean`; la ecualización admite `none`, `histogram_equalization`
 y `clahe`. El recorte agrega el margen configurado sin salir de la imagen.
 Una máscara hepática vacía provoca `ValueError` porque no se puede definir
 su caja de recorte.
 
 Las funciones de ventana, filtros, realce y recorte también pueden usarse
 por separado. Para reconstruir coordenadas desde un recorte, sumar su origen
-`(x0, y0)`. Para la segmentación base se usa `denoised`, que conserva la
-forma original y evita necesitar esa reconstrucción.
+`(x0, y0)`. Para la segmentación base se usa `denoised`, que ya contiene la
+ecualización y el filtrado de baja frecuencia, conserva la forma original y
+evita necesitar esa reconstrucción.
 
 `prepare_denoised_slice(slice_hu, cfg)` aplica solo ventana HU y denoising a un
-corte completo y devuelve la imagen normalizada. El ejecutor de segmentación y
-`extract_features.py` comparten esta función para analizar la misma etapa de
-preprocesamiento.
+corte completo y devuelve la imagen normalizada. `extract_features.py` y otros
+flujos que no usan ecualización pueden usar esta función. La segmentación
+principal aplica por separado ventana HU → ecualización → denoising antes del
+filtro de bordes seleccionado.
 
 ## 8. API de segmentación
 
@@ -695,13 +713,15 @@ python scripts/compare_filters.py --config /ruta/a/config.yaml
 ```
 
 El script toma el primer par caso/corte del CSV y lee únicamente ese corte 2D.
-Respeta la precedencia de `config.local.yaml`, la ventana HU y los parámetros
-configurados de mediana, gaussiano y bilateral. Guarda cuatro paneles con la
-misma escala `[0, 1]` y orientación en
+Respeta la precedencia de `config.local.yaml`, la ventana HU y la ecualización
+configurada, y luego compara los filtros bilateral, gaussiano y de media.
+Guarda cuatro paneles con la misma escala `[0, 1]` y orientación en
 `figures/filter_comparison_case_<id>_slice_<index>.png`, bajo el directorio de
 salida configurado (identificadores con ceros a la izquierda). No abre una
-ventana gráfica. Compara los tres filtros aunque `denoising.method` elija
-uno distinto para la segmentación. Si falta el CSV o está vacío, informa un error.
+ventana gráfica. El primer panel es la imagen ecualizada sin filtro de baja
+frecuencia; los otros tres aplican cada filtro después de la ecualización,
+aunque `denoising.method` elija uno distinto para la segmentación. Si falta el
+CSV o está vacío, informa un error.
 
 Registrar la ventana y los parámetros elegidos; comparar reducción de ruido y
 visibilidad de los bordes hepáticos y tumorales. La comparación visual no es
@@ -830,10 +850,26 @@ a `cfg_251`. Los umbrales HU se convierten usando la ventana efectiva; si alguno
 queda fuera de ella, la corrida falla. No se ajusta el preprocesamiento en la grilla.
 
 Cada caso se abre una vez en la primera pasada y solo se leen los planos elegidos;
-cada corte se filtra una vez. No se construye un array volumétrico completo.
-Se usa el mismo resultado `denoised` del preprocesamiento, sin realce ni recorte.
-Los cortes sin hígado se procesan con máscara vacía. En barrido se realiza una
-segunda pasada por casos para exportar las tres variantes ganadoras.
+cada corte sigue ventana HU → ecualización → filtro de baja frecuencia → filtro
+de alta frecuencia. No se construye un array volumétrico completo ni se recorta
+la imagen usada por el segmentador. Los cortes sin hígado se procesan con
+máscara vacía. En barrido se realiza una segunda pasada por casos para exportar
+las tres variantes ganadoras.
+
+Sobel genera el mapa de bordes y se usa para refinar la predicción inicial con
+watershed local: la máscara se expande cuatro píxeles dentro del hígado, sus
+componentes conectados actúan como marcadores de tumor y el anillo exterior como
+fondo. Prewitt solo aporta su mapa de bordes; Laplaciano muestra su respuesta y
+una versión realzada con `image + alpha * laplace(image)` (la convención de signo
+de scikit-image). Con el filtro de alta frecuencia en `none`, no se calcula un
+mapa, watershed ni realce.
+
+La grilla reserva seis paneles: Sobel muestra original, imagen procesada, mapa
+Sobel, etiquetas watershed, referencia tumoral y predicción refinada; Prewitt
+muestra original, imagen procesada, mapa Prewitt, referencia y predicción; el
+caso Laplaciano añade respuesta, imagen realzada, referencia y predicción. Con
+el filtro de bordes desactivado se muestran original, imagen procesada,
+referencia y predicción.
 
 ### Archivos por ejecución
 
@@ -845,10 +881,13 @@ segunda pasada por casos para exportar las tres variantes ganadoras.
 | `metrics_per_slice.csv` | Configuración, caso, corte, áreas, intersección, unión, Dice e IoU |
 | `metrics_per_case.csv` | Conteos acumulados sobre cortes seleccionados y métricas por caso |
 | `summary.csv` | Cantidad de casos, media y desvío poblacional entre casos |
+| `edge_metrics_per_slice.csv` | Métricas por corte; incluye respuesta de borde cuando no se elige `none` |
+| `edge_metrics_per_case.csv` | Métricas de borde y segmentación agregadas por caso |
+| `edge_metrics_summary.csv` | Resumen entre casos de las métricas de borde |
 | `best_configurations.csv` | Mejor configuración de cada método; solo en barrido |
 | `run.json` | Estado, argumentos, tiempos UTC, versiones, revisión Git y cambios locales |
 | `predictions/<configuration_id>/*.npy` | Máscaras booleanas completas, sin transposición |
-| `predictions/<configuration_id>/*.png` | Grilla cuadrada 2×2: imagen original con ventana HU, imagen denoised, referencia tumoral y predicción, con métricas |
+| `predictions/<configuration_id>/*.png` | Grilla cuadrada 2×3 por corte: original con ventana HU, imagen ecualizada y filtrada, respuesta del filtro, referencia y predicción; Sobel incluye watershed |
 
 Los CSV de métricas identifican la configuración mediante `configuration_id`;
 los parámetros completos se consultan en `configurations.csv`. `pred_area` y
@@ -917,7 +956,8 @@ solo al dibujar. La predicción aparece en cian y la referencia en rojo anaranja
 `dpi` debe ser un entero positivo. Las entradas inválidas generan `ValueError`.
 
 Estos helpers no se llaman automáticamente desde `run_segmentation.py`;
-las figuras del ejecutor mantienen sus tres paneles separados. Para guardar
+el ejecutor exporta una grilla compuesta 2×3 por corte con la imagen procesada,
+los resultados del filtro de bordes seleccionado, referencia y predicción. Para guardar
 una superposición del ejemplo de la sección 10:
 
 ```python
@@ -1211,7 +1251,7 @@ colapsada. `ProfileStore` guarda `collapsed`, `active_section` y `width` en
 | Encabezado | nombre, chevron | Alternar sidebar; `Ctrl+B` hace lo mismo |
 | Navegación | cinco botones / iconos del rail | Cambiar sección conservando su estado |
 | Caso | selector, archivo, slider, spinbox | Cargar caso y navegar cortes |
-| Preprocesamiento | entradas, combos, checkbox | Aplicar parámetros al corte visible |
+| Preprocesamiento | ventana HU, filtros, ecualización, alpha Laplaciano, recorte | Aplicar la secuencia al corte visible |
 | Segmentación | parámetros, toggles, Treeview | Segmentar corte y revisar métricas por lesión |
 | Cuantificación | botón ejecutar/cancelar, Treeview | Procesar morfología de referencia en 3D |
 | Resultados | Treeview, nota, abrir carpeta, log | Mostrar figura o vista previa de CSV en el visor |

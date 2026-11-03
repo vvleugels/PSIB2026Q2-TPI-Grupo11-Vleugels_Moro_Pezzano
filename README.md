@@ -119,6 +119,16 @@ figures and CSV tables appear in the **Resultados** list and use the same viewer
 The viewer supports previous/next, fit, 100%, zoom, pan, and overlay / before /
 after display. Pixel coordinates and HU values appear in the bottom status bar.
 
+The default image-processing preset is HU windowing (center 30, width 150),
+CLAHE equalization, Gaussian low-pass denoising (sigma 0.3), then Sobel
+high-pass filtering. In **Preprocesamiento**, denoising can be set to none,
+bilateral, Gaussian, or mean; equalization to none, histogram equalization, or
+CLAHE; and the edge filter to none, Sobel, Prewitt, or Laplacian. The same
+equalization → low-pass → high-pass order is used for the preview and batch
+segmentation. Each saved slice figure is a square 2×3 composite showing the
+HU-windowed original, processed image, and reference/prediction, plus the
+selected edge result. Sobel figures also show the local watershed refinement.
+
 In **Caso**, set **Casos a evaluar** and **Cortes por caso (3–5)**, then use
 **Aplicar y generar selección 2D**. These values also apply when the main 2D
 workflow generates its selection. Cases are chosen reproducibly using the
@@ -306,11 +316,12 @@ python scripts/compare_filters.py
 ```
 
 Optional `--config path/to/config.yaml` uses the same configuration rules.
-The script reads only the first selected slice and saves windowed input,
-median, Gaussian, and bilateral views to
+The script reads only the first selected slice, applies the configured
+equalization before the low-pass filters, and saves the equalized input with no
+low-pass filtering plus bilateral, Gaussian, and mean views to
 `<output_dir>/figures/filter_comparison_case_<id>_slice_<index>.png`, with
-zero-padded identifiers. It applies the configured HU window and each filter's
-parameters, regardless of which denoising method is active for segmentation.
+zero-padded identifiers. It applies the configured HU window, equalization,
+and filter parameters, regardless of which denoising method is active for segmentation.
 All panels use a common `[0, 1]` display scale; no GUI opens. Missing or empty
 selection CSVs produce an error. Compare noise reduction and boundary visibility;
 this figure does not measure segmentation accuracy.
@@ -370,8 +381,10 @@ test, and do not replace validation against independent segmentation ground
 truth; interpretation is limited by the small number of selected cases.
 
 The command accepts `--config path/to/config.yaml` and uses the configured
-data directory directly, without launcher fallback. Segmentation and features
-share `prepare_denoised_slice` for HU windowing and denoising.
+data directory directly, without launcher fallback. Feature extraction and
+other non-equalized workflows use `prepare_denoised_slice` for HU windowing and
+denoising. The main segmentation runner applies equalization before low-pass
+filtering and edge processing.
 
 For lesion-level detection and size-aware recall, analyze a completed run:
 
@@ -436,7 +449,8 @@ slices. These scripts use the repository configuration and do not accept
 Crop boxes use `(x0, y0, x1, y1)` with exclusive upper bounds; add the origin
 to crop-local coordinates when mapping back to the full slice. Crops use the
 reference liver mask. Baseline segmentation uses full-slice windowed and
-denoised images, without enhancement or cropping.
+denoised images without cropping, using the order HU window → equalization →
+low-pass denoising → selected high-pass filter.
 
 ## Code layout and interfaces
 
@@ -447,7 +461,8 @@ denoised images, without enhancement or cropping.
 | `src/psib/dataset.py` | Inventory and volume-based case/slice selection |
 | `src/psib/compression.py` | Huffman/RLE estimators and block-DCT JPEG-like codec |
 | `src/psib/reconstruction.py` | HU/attenuation conversion and Radon reconstruction helpers |
-| `src/psib/preprocessing.py` | HU windowing, denoising, enhancement, liver cropping |
+| `src/psib/preprocessing.py` | HU windowing, equalization, denoising, liver cropping |
+| `src/psib/edge_analysis.py` | Sobel/Prewitt/Laplacian response, Laplacian sharpening, Sobel watershed refinement |
 | `src/psib/segmentation.py` | Global, Otsu, and statistical thresholds with morphology |
 | `src/psib/metrics.py` | Dice and IoU |
 | `src/psib/features.py` | 2D lesion geometry and masked GLCM texture (entropy/ASM included) |
@@ -487,14 +502,15 @@ show `image.T` with `origin="lower"`.
 
 - `load_case(case_id, data_dir=None)` returns `(ct_hu, seg, spacing)`.
 - `iter_case_slices(...)` yields `(k, ct_2d, seg_2d, spacing)` using plane reads.
-- `preprocess_slice(...)` returns `windowed`, `denoised`, `enhanced`, `cropped`,
-  and `crop_box`.
+- `preprocess_slice(...)` applies windowing → equalization → denoising and returns
+  `windowed`, `enhanced` (equalized intermediate), `denoised` (final filtered
+  image), `cropped`, and `crop_box`.
 - `prepare_denoised_slice(slice_hu, cfg)` returns the normalized full-slice
-  image shared by segmentation and feature extraction.
+  image for workflows that do not use equalization.
 - `segment_slice(image, liver_mask, settings)` returns a full-slice boolean mask.
 - `plot_overlay(...)` and `save_overlay(...)` draw prediction contours in cyan
-  and reference contours in orange-red. These optional helpers are not called
-  by the experiment runner; its exported PNGs show three separate panels.
+  and reference contours in orange-red. The experiment runner instead saves a
+  per-slice 2×3 composite with the selected edge-filter stages.
 
 Scripts arrange their import paths automatically. For direct API use, add
 `src/` to the Python path; the project is not currently installable with
