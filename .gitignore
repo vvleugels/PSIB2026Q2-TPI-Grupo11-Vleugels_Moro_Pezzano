@@ -8,3 +8,8 @@ config.local.yaml
 PSIB.lnk
 results/
 data/*
+
+# Local experiments, reports, and editor settings
+/experiments/
+/reports/
+/.vscode/

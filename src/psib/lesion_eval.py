@@ -150,3 +150,61 @@ def _validate_binary_pair(pred, ref) -> tuple[np.ndarray, np.ndarray]:
         if mask.dtype.kind not in "buif" or not np.isfinite(mask).all() or not np.isin(mask, (0, 1)).all():
             raise ValueError(f"{name} debe ser una máscara binaria finita.")
     return pred.astype(bool, copy=False), ref.astype(bool, copy=False)
+
+
+def prepare_reference(ref, spacing):
+    """Cache reference geometry for evaluation only; never pass it to detection."""
+    ref, _ = _validate_binary_pair(ref, ref)
+    labels, count = ndimage.label(ref, structure=np.ones((3, 3), dtype=bool))
+    geometry = extract_geometric_features(ref, spacing)
+    diameters = dict(zip(geometry.component_id, geometry.max_diameter_mm))
+    return labels, np.bincount(labels.ravel(), minlength=count + 1), diameters
+
+
+def match_lesions_one_to_one(pred, ref, spacing, min_iou=0.10, *, prepared_reference=None):
+    """Maximize valid match cardinality first, total IoU second.
+
+    Returns one row per reference lesion plus unmatched predictions. Unlike
+    correspondence groups, splits/merges cannot count multiple detections.
+    """
+    pred, ref = _validate_binary_pair(pred, ref)
+    if not np.isfinite(min_iou) or not 0 <= min_iou <= 1:
+        raise ValueError('min_iou must be in [0, 1]')
+    rlabels, rsizes, diameters = (prepare_reference(ref, spacing) if prepared_reference is None
+                                else prepared_reference)
+    _, ious = label_prediction_ious(pred, rlabels, rsizes)
+    nref, npred = ious.shape
+    matches = {r + 1: p + 1 for r, p in _optimal_pairs(ious, (ious > 0) & (ious >= min_iou))}
+    rows = [dict(reference_id=r, predicted_id=matches.get(r, 0),
+                 status='TP' if r in matches else 'FN',
+                 iou=float(ious[r-1, matches[r]-1]) if r in matches else 0.0,
+                 diameter_ref_mm=float(diameters[r]), size_class=classify_diameter(diameters[r]))
+            for r in range(1, nref + 1)]
+    matched_predictions = set(matches.values())
+    rows.extend(dict(reference_id=0, predicted_id=p, status='FP', iou=0.0,
+                     diameter_ref_mm=np.nan, size_class='none') for p in range(1, npred + 1)
+                if p not in matched_predictions)
+    return pd.DataFrame(rows, columns=['reference_id', 'predicted_id', 'status', 'iou', 'diameter_ref_mm', 'size_class'])
+
+
+def label_prediction_ious(pred, reference_labels, reference_sizes):
+    """Return 8-connected prediction labels and component IoUs without background."""
+    labels, count = ndimage.label(pred, structure=np.ones((3, 3), dtype=bool))
+    sizes = np.bincount(labels.ravel(), minlength=count + 1)
+    both = (reference_labels > 0) & (labels > 0)
+    pairs = reference_labels[both] * (count + 1) + labels[both]
+    intersections = np.bincount(pairs, minlength=len(reference_sizes) * (count + 1)).reshape(
+        len(reference_sizes), count + 1)[1:, 1:]
+    union = reference_sizes[1:, None] + sizes[None, 1:] - intersections
+    ious = np.divide(intersections, union, out=np.zeros_like(intersections, dtype=float), where=union > 0)
+    return labels, ious
+
+
+def _optimal_pairs(ious, valid):
+    """Cardinality dominates every possible difference in summed IoU."""
+    from scipy.optimize import linear_sum_assignment
+    if not all(ious.shape):
+        return []
+    reward = valid * (min(ious.shape) + 1 + ious)
+    rr, pp = linear_sum_assignment(reward, maximize=True)
+    return [(int(r), int(p)) for r, p in zip(rr, pp) if valid[r, p]]

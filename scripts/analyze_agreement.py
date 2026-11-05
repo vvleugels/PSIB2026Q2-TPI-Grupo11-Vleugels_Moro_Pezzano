@@ -40,7 +40,7 @@ def agreement_statistics(frame: pd.DataFrame) -> pd.DataFrame:
         reference = data[ref_col].to_numpy(dtype=float)
         prediction = data[pred_col].to_numpy(dtype=float)
         difference = prediction - reference
-        mean = float((prediction + reference).mean()) if len(data) else np.nan
+        mean = float(((prediction + reference) / 2).mean()) if len(data) else np.nan
         mean_difference = float(difference.mean()) if len(data) else np.nan
         sd_difference = float(difference.std(ddof=1)) if len(data) > 1 else np.nan
         percent_difference = 100.0 * difference / reference if len(data) else np.asarray([])

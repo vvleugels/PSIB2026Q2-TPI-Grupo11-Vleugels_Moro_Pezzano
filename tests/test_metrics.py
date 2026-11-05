@@ -2,11 +2,34 @@ import unittest
 
 import numpy as np
 
-from psib.metrics import dice_score, iou_score
+from psib.metrics import dice_score, iou_score, reference_coverage
 
 
 class MetricsTests(unittest.TestCase):
     metrics = (dice_score, iou_score)
+
+    def test_reference_coverage(self):
+        ref = np.array([[1, 1], [0, 0]], dtype=bool)
+        pred = np.array([[1, 0], [1, 1]], dtype=bool)
+        self.assertEqual(reference_coverage(pred, ref), .5)
+        self.assertEqual(reference_coverage(np.ones_like(ref), ref), 1.)
+        self.assertEqual(reference_coverage(np.zeros_like(ref), ref), 0.)
+        self.assertTrue(np.isnan(reference_coverage(pred, np.zeros_like(ref))))
+        self.assertEqual(reference_coverage(pred[..., None], ref[..., None]), .5)
+        with self.assertRaises(ValueError):
+            reference_coverage(pred, np.zeros((3, 3)))
+
+    def test_coverage_aggregation_pools_reference_pixels(self):
+        import pandas as pd
+        from scripts.run_segmentation import aggregate_metrics
+        rows = pd.DataFrame(dict(configuration_id=['a']*3, case_id=[1,1,2],
+            slice_index=[1,2,1], pred_area=[1,0,5], reference_area=[1,9,0],
+            intersection=[1,0,0], union=[1,9,5]))
+        cases, summary = aggregate_metrics(rows)
+        self.assertAlmostEqual(cases.iloc[0].reference_coverage, .1)
+        self.assertTrue(np.isnan(cases.iloc[1].reference_coverage))
+        self.assertAlmostEqual(summary.iloc[0].reference_coverage_mean, .1)
+        self.assertEqual(summary.iloc[0].reference_coverage_n_cases, 1)
 
     def test_synthetic_scores(self):
         pred = np.array([[1, 1, 0], [1, 1, 0]], dtype=bool)

@@ -24,6 +24,16 @@ def _validate_masks(pred: np.ndarray, reference: np.ndarray) -> tuple[np.ndarray
     return pred.astype(bool, copy=False), reference.astype(bool, copy=False)
 
 
+def reference_coverage(pred: np.ndarray, reference: np.ndarray) -> float:
+    """Fraction of reference pixels/voxels covered; NaN if reference is empty.
+
+    This is pixel sensitivity, not lesion recall, and does not penalize FP.
+    """
+    pred, reference = _validate_masks(pred, reference)
+    area = int(np.count_nonzero(reference))
+    return float(np.count_nonzero(pred & reference) / area) if area else float('nan')
+
+
 def dice_score(pred: np.ndarray, reference: np.ndarray) -> float:
     """Return Dice in [0, 1]; two empty masks score 1, only one empty scores 0.
 

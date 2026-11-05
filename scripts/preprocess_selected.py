@@ -19,6 +19,8 @@ from psib.preprocessing import preprocess_slice
 
 def main() -> None:
     cfg = load_config(ROOT / "config.yaml")
+    window = cfg.get("preprocessing", {}).get("hu_window", {})
+    original_title = "HU window" if window.get("enabled", True) else "Liver intensity range"
     out = Path(cfg["_output_dir"]) / "figures"
     selected = pd.read_csv(Path(cfg["_output_dir"]) / "selected_cases_slices.csv")
     for case_id, rows in selected.groupby("case_id", sort=False):
@@ -29,7 +31,7 @@ def main() -> None:
             processed = preprocess_slice(hu, liver, cfg)
             fig, axes = plt.subplots(1, 3, figsize=(12, 4))
             for ax, image, title in zip(axes, (processed["windowed"], processed["denoised"], processed["cropped"]),
-                                        ("HU window", "Denoised", "Liver crop")):
+                                        (original_title, "Denoised", "Liver crop")):
                 ax.imshow(image.T, cmap="gray", origin="lower", vmin=0, vmax=1)
                 ax.set_title(title)
                 ax.axis("off")

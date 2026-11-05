@@ -9,13 +9,13 @@ class SegmentationTests(unittest.TestCase):
     def segment_mask(self, mask, settings, liver=None):
         if liver is None:
             liver = np.ones_like(mask, dtype=bool)
-        return segment_slice(np.where(mask, 0.1, 0.9), liver, settings)
+        return segment_slice(np.where(mask, 0.1, 0.9), liver, {"radius": 1, "min_area": 0, **settings})
 
     def test_global_threshold_and_liver_exclusion(self):
         image = np.array([[0.1, 0.45, 0.9], [0.2, 0.3, 0.1]])
         liver = np.array([[1, 1, 1], [1, 0, 0]])
         expected = np.array([[1, 0, 0], [1, 0, 0]], dtype=bool)
-        np.testing.assert_array_equal(segment_slice(image, liver, {}), expected)
+        np.testing.assert_array_equal(segment_slice(image, liver, {"min_area": 0}), expected)
 
     def test_otsu_uses_only_liver(self):
         liver = np.zeros((8, 8), dtype=bool)
@@ -27,7 +27,7 @@ class SegmentationTests(unittest.TestCase):
         expected[2:4, 2:6] = True
         for outside in (0.0, 1.0):
             image[~liver] = outside
-            np.testing.assert_array_equal(segment_slice(image, liver, {"method": "otsu"}), expected)
+            np.testing.assert_array_equal(segment_slice(image, liver, {"method": "otsu", "min_area": 0}), expected)
 
     def test_statistical_population_std_and_directions(self):
         # Liver mean=0.5 and population std=sqrt(0.08); k=1 selects endpoints.
@@ -39,11 +39,11 @@ class SegmentationTests(unittest.TestCase):
             for outside in (0.0, 1.0):
                 image[~liver] = outside
                 np.testing.assert_array_equal(segment_slice(image, liver, {
-                    "method": "statistical", "direction": direction, "k": 1.0,
+                    "method": "statistical", "direction": direction, "k": 1.0, "min_area": 0,
                 }), expected)
         # k=0 puts the threshold exactly on 0.5, which neither direction selects.
         for direction in ("lower", "upper"):
-            result = segment_slice(image, liver, {"method": "statistical", "k": 0, "direction": direction})
+            result = segment_slice(image, liver, {"method": "statistical", "k": 0, "direction": direction, "min_area": 0})
             self.assertFalse(result[0, 2])
             self.assertEqual(np.count_nonzero(result), 2)
 
@@ -124,7 +124,7 @@ class SegmentationTests(unittest.TestCase):
         image = np.where(mask, 0.1, 0.9)
         liver = np.ones_like(mask, dtype=np.uint8)
         settings = {"opening": True, "closing": True, "fill_holes": True,
-                    "footprint": "square", "min_area": 20}
+                    "footprint": "square", "radius": 1, "min_area": 20}
         image_before, liver_before, settings_before = image.copy(), liver.copy(), settings.copy()
         image.flags.writeable = liver.flags.writeable = False
         result = segment_slice(image, liver, settings)

@@ -19,6 +19,7 @@ import pandas as pd
 import yaml
 
 from psib.config import load_config
+from psib.detection import configured_prediction, validate_settings as validate_detection
 from psib.data_io import iter_case_slices
 from psib.metrics import dice_score, iou_score
 from psib.morphology3d import remove_small_components_3d, tumor_components_3d
@@ -45,6 +46,14 @@ def resolve_configuration(run_dir: Path, configuration_id: str) -> tuple[str, di
     if configs.empty or "configuration_id" not in configs:
         raise ValueError("La corrida no contiene configuraciones de segmentación.")
     if configuration_id == "best":
+        if (run_dir / "folds.json").exists():
+            raise ValueError("La validación anidada requiere un ID explícito; no tiene un ganador global.")
+        if (run_dir / "best_configurations.csv").exists():
+            best = pd.read_csv(run_dir / "best_configurations.csv")
+            if "selection_metric" in best:
+                return resolve_configuration(run_dir, str(best.iloc[0].configuration_id))
+        if "detector_settings" in configs and len(configs) > 1:
+            raise ValueError("No hay ganador factible del detector; indique un ID explícito.")
         metrics = pd.read_csv(run_dir / "metrics_per_case.csv")
         if metrics.empty or not {"configuration_id", "dice"}.issubset(metrics.columns):
             raise ValueError("No se puede elegir 'best': faltan métricas por caso.")
@@ -58,7 +67,11 @@ def resolve_configuration(run_dir: Path, configuration_id: str) -> tuple[str, di
     if matched.empty:
         raise ValueError(f"La configuración {configuration_id!r} no está en {run_dir / 'configurations.csv'}.")
     row = matched.iloc[0]
+    if "pipeline_config" in row and pd.notna(row["pipeline_config"]):
+        return configuration_id, {"pipeline_config": json.loads(row["pipeline_config"])}
     settings = {key: row[key] for key in SEGMENTATION_COLUMNS if key in row and pd.notna(row[key])}
+    if "detector_settings" in row and pd.notna(row["detector_settings"]):
+        return configuration_id, {"detection": validate_detection(json.loads(row["detector_settings"]))}
     return configuration_id, _validate_settings(settings)
 
 
@@ -76,8 +89,10 @@ def _measure_case(case_id: int, ct_dir: Path, settings: dict, cfg: dict,
     predicted_planes, reference_planes, spacing = [], [], None
     for slice_index, hu, labels, spacing in iter_case_slices(case_id, data_dir=ct_dir):
         liver = labels > 0
-        image = prepare_denoised_slice(hu, cfg)
-        predicted_planes.append(segment_slice(image, liver, settings))
+        active_cfg = ({**cfg, "detection": {"enabled": True, **settings["detection"]}} if "detection" in settings
+                      else settings.get("pipeline_config", cfg))
+        predicted_planes.append(configured_prediction(hu, liver, spacing, active_cfg,
+            None if "pipeline_config" in settings else settings)["mask"])
         reference_planes.append(labels == 2)
         if slice_index % 50 == 0:
             print(f"  Caso {case_id:03d}: corte {slice_index}", flush=True)
@@ -86,7 +101,7 @@ def _measure_case(case_id: int, ct_dir: Path, settings: dict, cfg: dict,
 
     prediction_raw = np.stack(predicted_planes, axis=2)
     reference = np.stack(reference_planes, axis=2)
-    prediction_clean = remove_small_components_3d(prediction_raw, min_component_voxels)
+    prediction_clean = prediction_raw.copy() if "detection" in settings else remove_small_components_3d(prediction_raw, min_component_voxels)
     ref_components, _ = tumor_components_3d(np.where(reference, 2, 0).astype(np.uint8), spacing)
     raw_components, _ = tumor_components_3d(np.where(prediction_raw, 2, 0).astype(np.uint8), spacing)
     clean_components, _ = tumor_components_3d(np.where(prediction_clean, 2, 0).astype(np.uint8), spacing)
@@ -194,7 +209,8 @@ def evaluate(run_dir: Path, data_dir: Path, min_component_voxels: int = 8,
                   )).to_csv(output / "morphology_3d_prediction_per_lesion.csv", index=False)
         plot_comparison(per_case, output / "comparison_3d.png")
         completed = {"status": "completed", "configuration_id": configuration_id,
-                     "min_component_voxels": min_component_voxels,
+                     "min_component_voxels": min_component_voxels if "detection" not in settings else None,
+                     "postprocessing_3d_applied": "detection" not in settings,
                      "n_cases": len(rows), "finished_at": datetime.now(timezone.utc).isoformat(),
                      "interpretation": "Exploratory full-volume stacking of 2D predictions; liver ROI uses reference labels."}
         (output / "run.json").write_text(json.dumps(completed, indent=2, ensure_ascii=False), encoding="utf-8")

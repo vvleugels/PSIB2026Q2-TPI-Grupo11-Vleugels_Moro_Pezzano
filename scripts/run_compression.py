@@ -29,7 +29,8 @@ from psib.config import load_config
 from psib.data_io import iter_case_slices
 from psib.features import extract_texture_features
 from psib.metrics import dice_score, iou_score
-from psib.preprocessing import prepare_denoised_slice
+from psib.preprocessing import prepare_denoised_slice, normalize_slice_hu
+from psib.detection import configured_prediction
 from psib.segmentation import segment_slice
 
 
@@ -106,11 +107,17 @@ def _texture_values(image, reference, region_masks):
 
 
 def _condition_result(condition, quality, image_u8, original_u8, reference, liver,
-                      seg_settings, compressed_bytes, texture_keys, extra=None):
+                      seg_settings, compressed_bytes, texture_keys, extra=None, *, detector_cfg=None, spacing=None):
     reconstructed = image_u8.astype(np.float32) / 255.0
     _case_statistics(reconstructed, liver, seg_settings)
     prediction_settings = {key: value for key, value in seg_settings.items() if key != "stats_scope"}
-    prediction = segment_slice(reconstructed, liver, prediction_settings)
+    if detector_cfg is not None:
+        window = detector_cfg.get("preprocessing", {}).get("hu_window", {})
+        center, width = float(window.get("center", 60)), float(window.get("width", 400))
+        restored_hu = reconstructed * width + center - width / 2
+        prediction = configured_prediction(restored_hu, liver, spacing, detector_cfg)["mask"]
+    else:
+        prediction = segment_slice(reconstructed, liver, prediction_settings)
     psnr, ssim = _metrics(image_u8, original_u8)
     row = {
         "condition": condition, "quality": quality,
@@ -130,9 +137,15 @@ def _condition_result(condition, quality, image_u8, original_u8, reference, live
 
 def process_slice(case_id, k, hu, labels, spacing, cfg, qualities):
     """Evaluate one selected slice, returning dynamic-property rows and images."""
-    prepared = prepare_denoised_slice(hu, cfg)
-    control = quantize_8bit(prepared)
     reference, liver = labels == 2, labels > 0
+    detector_cfg = cfg if cfg.get("detection", {}).get("enabled") else None
+    if detector_cfg is not None:
+        window = cfg.get("preprocessing", {}).get("hu_window", {})
+        # Preserve the fixed HU mapping used to decode the compressed image.
+        prepared = normalize_slice_hu(hu, {**window, "enabled": True}, liver_mask=liver)
+    else:
+        prepared = prepare_denoised_slice(hu, cfg, liver_mask=liver)
+    control = quantize_8bit(prepared)
     seg_settings = dict(cfg.get("segmentation", {}))
     regions = {"tumor": reference, "healthy_liver": (labels == 1)}
     control_texture = _texture_values(control.astype(np.float32) / 255, reference, regions)
@@ -168,7 +181,8 @@ def process_slice(case_id, k, hu, labels, spacing, cfg, qualities):
     control_row = None
     for condition, quality, image, size, extra in conditions:
         row, texture, prediction = _condition_result(condition, quality, image, control, reference,
-                                                     liver, seg_settings, size, texture_keys, extra)
+                                                     liver, seg_settings, size, texture_keys, extra,
+                                                     detector_cfg=detector_cfg, spacing=spacing)
         row.update(case_id=int(case_id), slice_index=int(k), spacing_x_mm=spacing[0], spacing_y_mm=spacing[1],
                    tumor_area_px=int(reference.sum()), liver_area_px=int(liver.sum()))
         rows.append(row)

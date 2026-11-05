@@ -13,6 +13,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 import matplotlib
@@ -27,18 +28,17 @@ from psib.config import load_config
 from psib.data_io import iter_case_slices
 from psib.edge_analysis import (edge_map, measure_edge_metrics, sharpen_with_laplacian,
                                 watershed_refine)
-from psib.metrics import dice_score, iou_score
-from psib.preprocessing import apply_hu_window, enhance, prepare_denoised_slice
+from psib.metrics import dice_score, iou_score, reference_coverage
+from psib.preprocessing import normalize_slice_hu, prepare_enhanced_slice
 from psib.segmentation import _validate_settings, segment_slice
 
 
 COUNT_COLUMNS = ["pred_area", "reference_area", "intersection", "union"]
 
 
-def prepare_image(hu, cfg):
-    """Window, denoise, then equalize one full-size slice for analysis."""
-    denoised = prepare_denoised_slice(hu, cfg)
-    return enhance(denoised, cfg.get("preprocessing", {}).get("enhancement", {}))
+def prepare_image(hu, cfg, *, liver_mask=None):
+    """Normalize, denoise, then enhance one full-size slice for analysis."""
+    return prepare_enhanced_slice(hu, cfg, liver_mask=liver_mask)
 
 
 def processed_image_title(cfg):
@@ -64,12 +64,16 @@ def processed_image_title(cfg):
 def build_configurations(cfg, sweep=False):
     """Return complete, validated settings with stable IDs (252 in sweep mode)."""
     window = cfg.get("preprocessing", {}).get("hu_window", {})
-    center, width = float(window.get("center", 60)), float(window.get("width", 400))
-    if not np.isfinite(center) or not np.isfinite(width) or width <= 0:
-        raise ValueError("La ventana HU debe tener centro finito y ancho positivo finito.")
-    low = center - width / 2
+    window_enabled = window.get("enabled", True)
+    if window_enabled:
+        center, width = float(window.get("center", 60)), float(window.get("width", 400))
+        if not np.isfinite(center) or not np.isfinite(width) or width <= 0:
+            raise ValueError("La ventana HU debe tener centro finito y ancho positivo finito.")
+        low = center - width / 2
     variants = []
     if sweep:
+        if not window_enabled:
+            raise ValueError("El barrido de umbrales en HU requiere una ventana HU activa.")
         thresholds = []
         for hu in (30, 40, 50):
             normalized = (hu - low) / width
@@ -95,7 +99,7 @@ def build_configurations(cfg, sweep=False):
         settings = _validate_settings(variant)
         records.append({"configuration_id": f"cfg_{i:03d}", **settings,
                         "threshold_hu": (low + width * settings["threshold"]
-                                         if settings["method"] == "global" else None)})
+                                         if window_enabled and settings["method"] == "global" else None)})
     return records
 
 
@@ -125,8 +129,7 @@ def iter_predictions(image, liver, records):
 
 def read_selection(path):
     if not path.is_file():
-        raise FileNotFoundError("Falta selected_cases_slices.csv. Ejecute scripts/explore_dataset.py "
-                                "y luego scripts/select_cases.py con las rutas de esta configuración.")
+        raise FileNotFoundError("Falta selected_cases_slices.csv. Ejecute scripts/select_slices_2d.py con las rutas de esta configuración.")
     frame = pd.read_csv(path)
     if frame.empty or not {"case_id", "slice_index"}.issubset(frame.columns):
         raise ValueError("La selección debe tener filas y columnas case_id y slice_index.")
@@ -154,10 +157,13 @@ def aggregate_metrics(slices):
     scores = [scores_from_counts(*(getattr(row, key) for key in COUNT_COLUMNS))
               for row in cases.itertuples(index=False)]
     cases["dice"], cases["iou"] = np.asarray(scores).T
+    cases["reference_coverage"] = cases.intersection / cases.reference_area.replace(0, np.nan)
     summary = cases.groupby("configuration_id", sort=True).agg(
         n_cases=("case_id", "size"), dice_mean=("dice", "mean"),
         dice_std=("dice", lambda x: x.std(ddof=0)), iou_mean=("iou", "mean"),
-        iou_std=("iou", lambda x: x.std(ddof=0))).reset_index()
+        iou_std=("iou", lambda x: x.std(ddof=0)),
+        reference_coverage_mean=("reference_coverage", "mean"),
+        reference_coverage_n_cases=("reference_coverage", "count")).reset_index()
     return cases, summary
 
 
@@ -214,11 +220,12 @@ def choose_best(summary, configurations):
 def export_slice_comparison(out, configuration_id, case_id, k, original, denoised,
                             operator, response, reference, prediction, *,
                             watershed_labels=None, watershed_prediction=None,
-                            sharpened=None, alpha=0.5, processed_title="Denoised"):
+                            sharpened=None, alpha=0.5, processed_title="Denoised",
+                            original_title="Original (HU window)"):
     """Save all images for one slice in a composite.
 
-    ``original`` is the original CT slice after the configured HU display window
-    has been applied; ``denoised`` is the filtered slice used by segmentation.
+    ``original`` is the normalized CT slice; ``denoised`` is the filtered slice
+    used by segmentation.
     Exactly one selected high-pass operator is shown in the figure.
     """
     directory = out / "predictions" / configuration_id
@@ -230,12 +237,12 @@ def export_slice_comparison(out, configuration_id, case_id, k, original, denoise
     if sharpened is not None:
         np.save(directory / f"{stem}_sharpened.npy", sharpened, allow_pickle=False)
 
-    common = [(original, "Original (HU window)", "gray", (0, 1)),
+    common = [(original, original_title, "gray", (0, 1)),
               (denoised, processed_title, "gray", (0, 1))]
     if operator == "sobel":
         panels = common + [
             (response, "Sobel gradient", "magma", (0, max(float(np.percentile(response, 99)), 1e-6))),
-            (watershed_labels, "Sobel watershed", "nipy_spectral", None),
+            (prediction, "Final mask (before watershed)", "gray", (0, 1)),
             (reference, "Tumor reference", "gray", (0, 1)),
             (watershed_prediction, "Watershed prediction", "gray", (0, 1)),
         ]
@@ -270,6 +277,9 @@ def export_slice_comparison(out, configuration_id, case_id, k, original, denoise
         for ax in list(axes.flat)[len(panels):]:
             ax.axis("off")
         details = f"Dice={dice_score(prediction, reference):.4f}; IoU={iou_score(prediction, reference):.4f}"
+        coverage = reference_coverage(prediction, reference)
+        details += (f"; Ref. coverage={coverage:.1%}" if np.isfinite(coverage)
+                    else "; Ref. coverage=N/A (no tumor reference)")
         if watershed_prediction is not None:
             details += f"; watershed Dice={dice_score(watershed_prediction, reference):.4f}"
         figure.suptitle(f"Case {case_id} / slice {k} / {configuration_id} / {operator} — {details}")
@@ -307,6 +317,14 @@ def run_experiment(config_path, run_id, sweep=False):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", run_id):
         raise ValueError("run-id solo admite letras ASCII, números, guiones y guiones bajos.")
     cfg = load_config(config_path)
+    if cfg.get("detection", {}).get("enabled", False):
+        if str(cfg['detection'].get('method', '')).startswith('local_') or cfg['detection'].get('method') == 'hybrid_size':
+            if sweep:
+                raise ValueError('Para el barrido local use scripts/run_local_search.py; no se reutiliza la grilla histórica.')
+            from scripts.run_local_segmentation import run_experiment as run_local
+            return run_local(config_path, run_id)
+        from scripts.run_detection import run_experiment as run_detection
+        return run_detection(config_path, run_id, sweep=sweep)
     out = Path(cfg["_output_dir"]) / "segmentation" / run_id
     out.parent.mkdir(parents=True, exist_ok=True)
     out.mkdir()  # Exclusive: never overwrite a previous run, even a failed one.
@@ -319,6 +337,7 @@ def run_experiment(config_path, run_id, sweep=False):
         _write_status(out, state)
         configurations = build_configurations(cfg, sweep)
         effective = {key: value for key, value in cfg.items() if not key.startswith("_")}
+        effective["preprocessing_scope"] = "liver"
         effective["segmentation"] = _validate_settings(cfg.get("segmentation", {}))
         (out / "effective_config.yaml").write_text(yaml.safe_dump(effective, sort_keys=False), encoding="utf-8")
         source = Path(cfg["_output_dir"]) / "selected_cases_slices.csv"
@@ -344,12 +363,11 @@ def run_experiment(config_path, run_id, sweep=False):
                 context = f"caso {case_id}, cortes {indices}"
                 for k, hu, labels, _ in iter_case_slices(case_id, indices, cfg["data_dir"]):
                     context = f"caso {case_id}, corte {k}"
-                    window = cfg.get("preprocessing", {}).get("hu_window", {})
-                    original = apply_hu_window(
-                        hu, float(window.get("center", 60)), float(window.get("width", 400)))
-                    image = prepare_image(hu, cfg)
                     liver, reference = labels > 0, labels == 2
-                    response = edge_map(image, edge_operator) if edge_operator != "none" else None
+                    window = cfg.get("preprocessing", {}).get("hu_window", {})
+                    original = normalize_slice_hu(hu, window, liver_mask=liver)
+                    image = prepare_image(hu, cfg, liver_mask=liver)
+                    response = edge_map(image, edge_operator, liver_mask=liver) if edge_operator != "none" else None
                     sharpened = (sharpen_with_laplacian(image, edge_alpha, response=response)
                                  if edge_operator == "laplace" else None)
                     baseline_predictions = iter_predictions(image, liver, active)
@@ -377,7 +395,8 @@ def run_experiment(config_path, run_id, sweep=False):
                                          "pred_area": int(pred.sum()), "reference_area": int(reference.sum()),
                                          "intersection": int(np.count_nonzero(pred & reference)),
                                          "union": int(np.count_nonzero(pred | reference)),
-                                         "dice": dice_score(pred, reference), "iou": iou_score(pred, reference)})
+                                         "dice": dice_score(pred, reference), "iou": iou_score(pred, reference),
+                                         "reference_coverage": reference_coverage(pred, reference)})
                             edge_row = {
                                 "configuration_id": cid, "case_id": case_id, "slice_index": k,
                                 "edge_operator": edge_operator,
@@ -413,7 +432,9 @@ def run_experiment(config_path, run_id, sweep=False):
                                 out, cid, case_id, k, original, image, edge_operator, response,
                                 reference, pred, watershed_labels=watershed_labels,
                                 watershed_prediction=watershed_pred, sharpened=sharpened,
-                                alpha=edge_alpha, processed_title=processed_image_title(cfg))
+                                alpha=edge_alpha, processed_title=processed_image_title(cfg),
+                                original_title=("Original (HU window)" if window.get("enabled", True)
+                                                else "Original (liver intensity range)"))
                 del hu, labels, image, liver, reference, pred
                 print(f"{'Exportado' if export_only else 'Evaluado'} caso {case_id}", flush=True)
 

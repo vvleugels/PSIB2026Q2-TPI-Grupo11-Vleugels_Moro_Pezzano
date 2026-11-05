@@ -23,7 +23,8 @@ class RunSegmentationTests(unittest.TestCase):
         self.output.mkdir()
         self.config = self.root / 'config.yaml'
         self.cfg = {'data_dir': 'data', 'output_dir': 'results',
-                    'preprocessing': {'denoising': {'method': 'median', 'median_size': 1}}}
+                    'preprocessing': {'denoising': {'method': 'median', 'median_size': 1}},
+                    'segmentation': {'min_area': 0}}
         self.config.write_text(yaml.safe_dump(self.cfg))
         ct = np.full((9, 9, 3), 60, dtype=np.int16)
         seg = np.zeros_like(ct, dtype=np.uint8)
@@ -79,6 +80,10 @@ class RunSegmentationTests(unittest.TestCase):
         self.assertEqual({r['threshold_hu'] for r in global_records}, {30, 40, 50})
         with self.assertRaisesRegex(ValueError, 'fuera de la ventana'):
             build_configurations({'preprocessing': {'hu_window': {'center': 0, 'width': 10}}}, True)
+        unwindowed = {'preprocessing': {'hu_window': {'enabled': False, 'width': 0}}}
+        self.assertIsNone(build_configurations(unwindowed)[0]['threshold_hu'])
+        with self.assertRaisesRegex(ValueError, 'requiere una ventana HU activa'):
+            build_configurations(unwindowed, True)
 
     def test_sweep_keeps_all_metrics_and_exports_winners(self):
         self.save_selection(self.selected.iloc[[0, 2]])
@@ -136,7 +141,7 @@ class RunSegmentationTests(unittest.TestCase):
             if i >= 6:
                 self.assertIn('caso', state['context'])
         (self.output / 'selected_cases_slices.csv').unlink()
-        with self.assertRaisesRegex(RuntimeError, 'explore_dataset.py'):
+        with self.assertRaisesRegex(RuntimeError, 'select_slices_2d.py'):
             run_experiment(self.config, 'missing')
         for run_id in ('../escape', 'with space', ''):
             with self.assertRaises(ValueError):

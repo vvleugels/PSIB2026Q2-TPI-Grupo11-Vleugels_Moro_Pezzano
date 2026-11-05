@@ -14,7 +14,7 @@ from skimage.morphology import disk
 _DEFAULTS = {
     "method": "global", "threshold": 0.45, "k": 1.0, "direction": "lower",
     "opening": False, "closing": False, "fill_holes": False,
-    "footprint": "disk", "radius": 1, "min_area": 0,
+    "footprint": "disk", "radius": 2, "min_area": 10,
 }
 _CONNECTIVITY = np.ones((3, 3), dtype=bool)
 
@@ -57,7 +57,7 @@ def segment_slice(image: np.ndarray, liver_mask: np.ndarray,
     settings are modified. No tumor reference is used.
 
     Settings default to global threshold 0.45, statistical k=1/direction='lower',
-    no morphology, footprint='disk', radius=1 and min_area=0. Alternatives are
+    no morphology, footprint='disk', radius=2 and min_area=10. Alternatives are
     method='otsu'/'statistical', direction='upper', footprint='square'. Square
     side length is 2*radius+1. Convert HU thresholds before calling with
     (HU - window_lower_bound) / window_width; 40 HU maps to 0.45 for the current
@@ -104,6 +104,16 @@ def segment_slice(image: np.ndarray, liver_mask: np.ndarray,
     else:
         result[liver] = values < threshold
 
+    return postprocess_mask(result, liver, cfg)
+
+
+def postprocess_mask(mask, liver_mask, settings):
+    """Apply shared morphology and pixel-area filtering to a predicted mask."""
+    cfg = _validate_settings(settings)
+    liver = np.asarray(liver_mask, dtype=bool)
+    result = np.asarray(mask, dtype=bool) & liver
+    if result.ndim != 2 or np.asarray(mask).shape != liver.shape:
+        raise ValueError("Expected aligned 2D prediction and liver masks")
     if cfg["opening"] or cfg["closing"]:
         radius = int(cfg["radius"])
         footprint = (disk(radius).astype(bool) if cfg["footprint"] == "disk"

@@ -12,6 +12,7 @@ import ctypes
 import subprocess
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -26,13 +27,16 @@ sys.path.insert(0, str(ROOT / "src"))
 from psib.config import load_config
 from psib.gui_model import ProfileStore, SidebarState, SECTIONS
 from psib.data_io import list_cases, load_case, iter_case_slices
-from psib.preprocessing import prepare_denoised_slice, enhance, liver_bounding_box
+from psib.preprocessing import liver_bounding_box, normalize_slice_hu, prepare_enhanced_slice
+from psib.detection import configured_prediction
 from psib.segmentation import segment_slice
-from psib.metrics import dice_score, iou_score
+from psib.metrics import dice_score, iou_score, reference_coverage
 from psib.app_icon import load_icon_images, warn_icon_once
 from scipy import ndimage
 
 DEFAULT_CONFIG = ROOT / "config.yaml"
+EXPERIMENT_CONTROLS = ROOT / "config" / "presets" / "controls.json"
+EXPERIMENT_PRESETS = ("hu_sensitive", "default", "otsu_059")
 RESULT_PREFIX = "TPI run completed. Results are in "
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
@@ -90,9 +94,10 @@ class TpiLauncher:
         self.results_files: list[Path] = []
         self.analysis_case_ids: list[int] = []
         self.last_selection_signature: tuple | None = None
-        self.view_mode = tk.StringVar(value="Overlay")
+        self.view_mode = tk.StringVar(value="Entrada")
         self.show_reference = tk.BooleanVar(value=True)
         self.show_prediction = tk.BooleanVar(value=True)
+        self.show_liver_mask = tk.BooleanVar(value=False)
         self.overlay_opacity = tk.DoubleVar(value=0.45)
         self.preprocessing_vars: dict[str, tk.Variable] = {}
         self.segmentation_vars: dict[str, tk.Variable] = {}
@@ -293,6 +298,8 @@ class TpiLauncher:
 
     def build_preprocessing_section(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Preprocesamiento", style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 8))
+        ttk.Label(parent, text="Los filtros usan la máscara hepática. El detector HU recibe los HU originales.",
+                  wraplength=280).pack(anchor="w", pady=(0, 6))
         cfg = load_config(DEFAULT_CONFIG)
         prep = cfg.get("preprocessing", {})
         window = prep.get("hu_window", {})
@@ -304,10 +311,11 @@ class TpiLauncher:
             denoise_method = "bilateral"
         parameter_keys = {"bilateral": "bilateral_sigma_color", "gaussian": "gaussian_sigma",
                           "mean": "mean_size"}
-        parameter_defaults = {"bilateral": 0.08, "gaussian": 0.3, "mean": 3}
+        parameter_defaults = {"bilateral": 0.08, "gaussian": 0.6, "mean": 3}
         parameter_key = parameter_keys.get(denoise_method, "bilateral_sigma_color")
         parameter_default = parameter_defaults.get(denoise_method, 0.08)
         self.preprocessing_vars = {
+            "hu_window_enabled": tk.BooleanVar(value=window.get("enabled", True)),
             "center": tk.StringVar(value=str(window.get("center", 60))),
             "width": tk.StringVar(value=str(window.get("width", 400))),
             "denoising": tk.StringVar(value=denoise_method),
@@ -317,8 +325,12 @@ class TpiLauncher:
             "sharpen_alpha": tk.StringVar(value=str(edge_settings.get("sharpen_alpha", 0.5))),
             "edge_operator": tk.StringVar(value=str(edge_settings.get("operator", "sobel"))),
             "equalization": tk.StringVar(value=str(enhancement.get("method", "clahe"))),
+            "contrast": tk.StringVar(value=str(enhancement.get("contrast", 1.0))),
+            "clahe_clip_limit": tk.StringVar(),
+            "clahe_kernel_size": tk.StringVar(),
             "crop": tk.BooleanVar(value=True),
         }
+        ttk.Checkbutton(parent, text="Aplicar ventana HU", variable=self.preprocessing_vars["hu_window_enabled"]).pack(anchor="w")
         self.labeled_entry(parent, "Centro de ventana (HU)", self.preprocessing_vars["center"])
         self.labeled_entry(parent, "Ancho de ventana (HU)", self.preprocessing_vars["width"])
         self.labeled_combo(parent, "Denoising", self.preprocessing_vars["denoising"],
@@ -330,13 +342,52 @@ class TpiLauncher:
         self.labeled_entry(parent, "α realce Laplaciano (solo Laplace)", self.preprocessing_vars["sharpen_alpha"])
         self.labeled_combo(parent, "Ecualización", self.preprocessing_vars["equalization"],
                            ("none", "histogram_equalization", "clahe"))
+        self.labeled_entry(parent, "Límite CLAHE (vacío: YAML)", self.preprocessing_vars["clahe_clip_limit"])
+        self.labeled_entry(parent, "Ventana CLAHE (vacío: YAML)", self.preprocessing_vars["clahe_kernel_size"])
+        self.labeled_entry(parent, "Contraste (1 = neutro)", self.preprocessing_vars["contrast"])
         ttk.Checkbutton(parent, text="Recortar a hígado (visualización)", variable=self.preprocessing_vars["crop"]).pack(anchor="w", pady=6)
         ttk.Button(parent, text="Aplicar al corte", style="Secondary.TButton",
                    command=self.apply_preprocessing).pack(fill="x", pady=6)
 
     def build_segmentation_section(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Segmentación 2D", style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 8))
+        self.build_experiment_presets(parent)
         defaults = load_config(DEFAULT_CONFIG).get("segmentation", {})
+        detection = load_config(DEFAULT_CONFIG).get("detection", {})
+        self.detection_enabled = tk.BooleanVar(value=detection.get("enabled", False))
+        self.detection_method = tk.StringVar(value=detection.get("method", "hysteresis"))
+        self.labeled_combo(parent, "Salida del detector", self.detection_method,
+                           ("hysteresis", "watershed", "local_growth", "local_contour", "local_graphcut"))
+        self.local_high = tk.StringVar(value=str(detection.get("high", 2.) if str(detection.get("method", "")).startswith("local_") else 2.))
+        self.local_refinement = tk.StringVar(value=str(detection.get("refinement", 2.)))
+        self.local_polarity = tk.StringVar(value=detection.get("polarity", "dark"))
+        self.local_context = tk.BooleanVar(value=detection.get("context", True))
+        self.local_config_pipeline = tk.BooleanVar(
+            value=load_config(DEFAULT_CONFIG).get("local_pipeline", "raw_hu") == "configured")
+        self.local_overlays = tk.BooleanVar(value=False)
+        self.local_parameters = ({k: v for k, v in detection.items() if k != "enabled"}
+                                 if str(detection.get("method", "")).startswith("local_") else {})
+        self.labeled_entry(parent, "Semillas locales (1,5 / 2 / 2,5)", self.local_high)
+        self.labeled_entry(parent, "Tolerancia crecimiento / peso contorno-grafo", self.local_refinement)
+        self.labeled_combo(parent, "Candidatos locales", self.local_polarity, ("dark", "both"))
+        ttk.Checkbutton(parent, text="Usar cortes vecinos (métodos locales)", variable=self.local_context).pack(anchor="w")
+        ttk.Checkbutton(parent, text="Mostrar semillas y candidatos", variable=self.local_overlays,
+                        command=self.redraw_slice_overlay).pack(anchor="w")
+        ttk.Checkbutton(parent, text="Locales: usar preprocesamiento y morfología del config",
+                        variable=self.local_config_pipeline).pack(anchor="w")
+        ttk.Button(parent, text="Cargar preset local YAML", command=self.load_local_preset).pack(fill="x")
+        self.detection_vars = {}
+        for key, label, default in (("sigma_mm", "Suavizado (mm)", 0.6),
+                                     ("high", "Umbral de semillas", 1.0),
+                                     ("low", "Umbral de crecimiento", 0.5),
+                                     ("min_area_mm2", "Área mínima detector (mm²)", 0.0)):
+            self.detection_vars[key] = tk.StringVar(value=str(detection.get(key, default)))
+            self.labeled_entry(parent, label, self.detection_vars[key])
+        for key, label in (("background_sigma_mm", "σ de fondo (mm, vacío: YAML)"),
+                           ("noise_floor_hu", "Piso de ruido (HU, vacío: YAML)")):
+            self.detection_vars[key] = tk.StringVar()
+            self.labeled_entry(parent, label, self.detection_vars[key])
+        ttk.Label(parent, text="Umbralización: baseline histórico").pack(anchor="w")
         self.segmentation_vars = {
             "method": tk.StringVar(value=str(defaults.get("method", "global"))),
             "threshold": tk.StringVar(value=str(defaults.get("threshold", 0.45))),
@@ -346,13 +397,36 @@ class TpiLauncher:
             "closing": tk.BooleanVar(value=bool(defaults.get("closing", False))),
             "fill_holes": tk.BooleanVar(value=bool(defaults.get("fill_holes", False))),
             "footprint": tk.StringVar(value=str(defaults.get("footprint", "disk"))),
-            "radius": tk.StringVar(value=str(defaults.get("radius", 1))),
-            "min_area": tk.StringVar(value=str(defaults.get("min_area", 0))),
+            "radius": tk.StringVar(value=str(defaults.get("radius", 2))),
+            "min_area": tk.StringVar(value=str(defaults.get("min_area", 10))),
         }
         self.labeled_combo(parent, "Método", self.segmentation_vars["method"], ("global", "otsu", "statistical"))
-        self.labeled_entry(parent, "Umbral [0–1]", self.segmentation_vars["threshold"])
-        self.labeled_entry(parent, "k estadístico", self.segmentation_vars["k"])
-        self.labeled_combo(parent, "Dirección", self.segmentation_vars["direction"], ("lower", "upper"))
+        threshold_entry = self.labeled_entry(parent, "Umbral manual [0–1] (global)", self.segmentation_vars["threshold"])
+        k_entry = self.labeled_entry(parent, "k estadístico", self.segmentation_vars["k"])
+        direction_combo = self.labeled_combo(parent, "Dirección (statistical)", self.segmentation_vars["direction"],
+                                             ("lower", "upper"))
+        method_hint = ttk.Label(parent, style="Body.TLabel", wraplength=270)
+        method_hint.pack(fill="x", pady=(4, 0))
+
+        def update_threshold_controls(*_args):
+            method = self.segmentation_vars["method"].get()
+            detector_enabled = self.detection_enabled.get()
+            global_active = not detector_enabled and method == "global"
+            statistical_active = not detector_enabled and method == "statistical"
+            threshold_entry.configure(state="normal" if global_active else "disabled")
+            k_entry.configure(state="normal" if statistical_active else "disabled")
+            direction_combo.configure(state="readonly" if statistical_active else "disabled")
+            hints = {
+                "global": "Global usa el umbral manual. Pulsá Segmentar corte actual para ver el cambio.",
+                "otsu": "Otsu calcula el umbral de cada corte. Elegí global para probar un valor manual.",
+                "statistical": "El método estadístico calcula el umbral con k y la dirección.",
+            }
+            method_hint.configure(text="La predicción usa el detector activo." if detector_enabled else hints[method])
+
+        self.segmentation_vars["method"].trace_add("write", update_threshold_controls)
+        self.detection_enabled.trace_add("write", update_threshold_controls)
+        update_threshold_controls()
+        ttk.Label(parent, text="Filtrado final: baseline y locales con config").pack(anchor="w")
         for key, title in (("opening", "Apertura morfológica"), ("closing", "Cierre morfológico"),
                            ("fill_holes", "Rellenar huecos")):
             ttk.Checkbutton(parent, text=title, variable=self.segmentation_vars[key]).pack(anchor="w")
@@ -367,7 +441,7 @@ class TpiLauncher:
         self.labeled_entry(parent, "Opacidad máscara (0–1)", self.overlay_opacity)
         ttk.Button(parent, text="Segmentar corte actual", style="Secondary.TButton",
                    command=self.segment_current_slice).pack(fill="x", pady=(6, 7))
-        self.metrics_text = tk.StringVar(value="Dice —  ·  IoU —  ·  área —  ·  lesiones —")
+        self.metrics_text = tk.StringVar(value="Cobertura referencia —\nDice —  ·  IoU —  ·  área —  ·  lesiones —")
         ttk.Label(parent, textvariable=self.metrics_text, style="Body.TLabel", wraplength=280).pack(fill="x")
         columns = ("lesion", "area", "centroid")
         self.lesion_table = ttk.Treeview(parent, columns=columns, show="headings", height=4)
@@ -375,6 +449,21 @@ class TpiLauncher:
             self.lesion_table.heading(key, text=title)
             self.lesion_table.column(key, width=width, anchor="center", stretch=True)
         self.lesion_table.pack(fill="x", pady=(5, 0))
+
+    def build_experiment_presets(self, parent: ttk.Frame) -> None:
+        self.experiment_preset = tk.StringVar(value="hu_sensitive")
+        self.experiment_preset_applied = False
+        self.labeled_combo(parent, "Alternativas experimentales", self.experiment_preset,
+                           EXPERIMENT_PRESETS)
+        ttk.Label(parent, text="Opcionales. El método principal se carga desde config.yaml; "
+                  "el preset 'default' es una alternativa histórica.",
+                  style="Body.TLabel", wraplength=255).pack(anchor="w", pady=(4, 2))
+        ttk.Button(parent, text="Aplicar preset", style="Secondary.TButton",
+                   command=self.apply_experiment_preset).pack(fill="x", pady=(4, 2))
+        self.preset_status = tk.StringVar(value="Aplicá un preset para cargar sus campos editables.")
+        ttk.Label(parent, textvariable=self.preset_status, style="Body.TLabel",
+                  wraplength=255).pack(anchor="w")
+        ttk.Separator(parent).pack(fill="x", pady=8)
 
     def build_quantification_section(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Cuantificación 3D", style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 8))
@@ -424,13 +513,17 @@ class TpiLauncher:
                    command=self.browse_results_path).pack(fill="x")
         ttk.Label(parent, text="Registro", style="Body.TLabel").pack(anchor="w", pady=(6, 2))
 
-    def labeled_entry(self, parent, label: str, variable: tk.Variable) -> None:
+    def labeled_entry(self, parent, label: str, variable: tk.Variable) -> ttk.Entry:
         ttk.Label(parent, text=label, style="Body.TLabel").pack(anchor="w", pady=(5, 1))
-        ttk.Entry(parent, textvariable=variable).pack(fill="x")
+        entry = ttk.Entry(parent, textvariable=variable)
+        entry.pack(fill="x")
+        return entry
 
-    def labeled_combo(self, parent, label: str, variable: tk.StringVar, values) -> None:
+    def labeled_combo(self, parent, label: str, variable: tk.StringVar, values) -> ttk.Combobox:
         ttk.Label(parent, text=label, style="Body.TLabel").pack(anchor="w", pady=(5, 1))
-        ttk.Combobox(parent, textvariable=variable, values=values, state="readonly").pack(fill="x")
+        combo = ttk.Combobox(parent, textvariable=variable, values=values, state="readonly")
+        combo.pack(fill="x")
+        return combo
 
     def bind_sidebar_shortcuts(self) -> None:
         self.root.bind("<Control-b>", lambda _event: self.toggle_sidebar())
@@ -669,8 +762,11 @@ class TpiLauncher:
         else:
             selection.pop("case_ids", None)
         prep = config.setdefault("preprocessing", {})
-        prep.setdefault("hu_window", {}).update(center=float(self.preprocessing_vars["center"].get()),
-                                                  width=float(self.preprocessing_vars["width"].get()))
+        window = prep.setdefault("hu_window", {})
+        window["enabled"] = self.preprocessing_vars["hu_window_enabled"].get()
+        if window["enabled"]:
+            window.update(center=float(self.preprocessing_vars["center"].get()),
+                          width=float(self.preprocessing_vars["width"].get()))
         method = self.preprocessing_vars["denoising"].get()
         denoise = {"method": method}
         if method != "none":
@@ -686,16 +782,139 @@ class TpiLauncher:
             denoise["bilateral_sigma_spatial"] = float(
                 self.preprocessing_vars["bilateral_sigma_spatial"].get())
         prep["denoising"] = denoise
-        prep.setdefault("enhancement", {})["method"] = self.preprocessing_vars["equalization"].get()
+        enhancement = prep.setdefault("enhancement", {})
+        enhancement["method"] = self.preprocessing_vars["equalization"].get()
+        enhancement["contrast"] = float(self.preprocessing_vars["contrast"].get())
+        for key, convert in (("clahe_clip_limit", float), ("clahe_kernel_size", int)):
+            value = self.preprocessing_vars[key].get().strip()
+            if value:
+                enhancement[key] = convert(value)
         config.setdefault("edge_analysis", {})["sharpen_alpha"] = float(
             self.preprocessing_vars["sharpen_alpha"].get())
         config.setdefault("edge_analysis", {})["operator"] = self.preprocessing_vars["edge_operator"].get()
         segment = {key: var.get() for key, var in self.segmentation_vars.items()}
-        segment["threshold"] = float(segment["threshold"])
-        segment["k"] = float(segment["k"])
+        detector_enabled = self.detection_enabled.get()
+        saved_segment = config.get("segmentation", {})
+        for key, method, default in (("threshold", "global", 0.45), ("k", "statistical", 1.0)):
+            if detector_enabled or segment["method"] != method:
+                segment[key] = saved_segment.get(key, default)
+            segment[key] = float(segment[key])
         segment["radius"] = int(segment["radius"])
         segment["min_area"] = int(segment["min_area"])
+        if self.experiment_preset_applied:
+            config["detection"] = {}
+        config["local_pipeline"] = "configured" if self.local_config_pipeline.get() else "raw_hu"
+        detector = config.setdefault("detection", {})
+        detector.update(enabled=detector_enabled, method=self.detection_method.get())
+        if not detector["enabled"]:
+            return config, segment
+        if detector["method"].startswith("local_"):
+            from psib.local_segmentation import validate_settings
+            parameters = validate_settings({**self.local_parameters, "method": detector["method"],
+                "high": float(self.local_high.get()), "refinement": float(self.local_refinement.get()),
+                "polarity": self.local_polarity.get(), "context": self.local_context.get()})
+            config["detection"] = dict(enabled=True, **parameters)
+        else:
+            for key, variable in self.detection_vars.items():
+                value = variable.get().strip()
+                if value or key not in ("background_sigma_mm", "noise_floor_hu"):
+                    detector[key] = float(value)
         return config, segment
+
+    def apply_experiment_preset(self) -> None:
+        name = self.experiment_preset.get()
+        try:
+            controls = json.loads(EXPERIMENT_CONTROLS.read_text(encoding="utf-8"))
+            baseline, preset = controls["default"], controls[name]
+            base_prep, prep = baseline["preprocessing"], preset.get("preprocessing", {})
+            window = {**base_prep["hu_window"], **prep.get("hu_window", {})}
+            denoising = {**base_prep["denoising"], **prep.get("denoising", {})}
+            enhancement = {**base_prep["enhancement"], **prep.get("enhancement", {})}
+            edges = {**baseline["edge_analysis"], **preset.get("edge_analysis", {})}
+            segmentation = {**baseline["segmentation"], **preset.get("segmentation", {})}
+            detection = {**baseline["detection"], **preset.get("detection", {})}
+            preprocessing = dict(center=window["center"], width=window["width"], denoising=denoising["method"],
+                                 parameter=denoising["gaussian_sigma"], equalization=enhancement["method"],
+                                 contrast=enhancement.get("contrast", 1.0),
+                                 clahe_clip_limit=enhancement["clahe_clip_limit"],
+                                 clahe_kernel_size=enhancement["clahe_kernel_size"],
+                                 edge_operator=edges["operator"], sharpen_alpha=edges["sharpen_alpha"])
+            updates = [(self.preprocessing_vars[key], str(value)) for key, value in preprocessing.items()]
+            updates.append((self.preprocessing_vars["hu_window_enabled"], window.get("enabled", True)))
+            updates.extend((variable, segmentation[key]) for key, variable in self.segmentation_vars.items())
+            updates.extend((variable, str(detection[key])) for key, variable in self.detection_vars.items())
+            updates.extend(((self.detection_enabled, detection["enabled"]), (self.detection_method, detection["method"])))
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            messagebox.showerror("Preset del experimento inválido", str(exc))
+            return
+        for variable, value in updates:
+            variable.set(value)
+        self.experiment_preset_applied = True
+        self.preset_status.set(f"{name} aplicado. Podés editar los campos habilitados.")
+        self.append_log(f"Preset {name} aplicado a Preprocesamiento y Segmentación.")
+
+    def load_local_preset(self) -> None:
+        path = filedialog.askopenfilename(filetypes=[("YAML", "*.yaml *.yml")])
+        if not path:
+            return
+        try:
+            from psib.local_segmentation import validate_settings
+            preset = yaml.safe_load(Path(path).read_text())
+            values = preset["detection"]
+            settings = validate_settings({k: v for k, v in values.items() if k != "enabled"})
+            self.local_parameters = settings
+            self.local_config_pipeline.set(preset.get("local_pipeline", "raw_hu") == "configured")
+            self.detection_enabled.set(True)
+            self.detection_method.set(settings["method"])
+            self.local_high.set(str(settings["high"]))
+            self.local_refinement.set(str(settings["refinement"]))
+            self.local_polarity.set(settings["polarity"])
+            self.local_context.set(settings["context"])
+            self.append_log("Preset local cargado; aplicar al corte para calcularlo.")
+        except Exception as exc:
+            messagebox.showerror("Preset local inválido", str(exc))
+
+    def redraw_slice_overlay(self) -> None:
+        if self.current_hu is not None:
+            source = self.current_hu if self.view_mode.get() == "Antes" or self.current_processed is None else self.current_processed
+            self.draw_case_image(source)
+
+    def start_local_preview(self, config, settings, k, token):
+        from psib.local_segmentation import context_from_volume
+        if not hasattr(self, "local_executor"):
+            self.local_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="local-preview")
+        if getattr(self, "local_future", None) is not None:
+            self.local_future.cancel()
+        volume, labels, spacing = self.case_volume, self.case_labels, self.case_spacing
+        def compute():
+            liver = labels > 0
+            context = context_from_volume(volume, liver, k, spacing) if config["detection"]["context"] else None
+            return configured_prediction(volume[:, :, k], liver[:, :, k], spacing, config, settings, context=context)
+        future = self.local_executor.submit(compute)
+        self.local_future = future
+        self.metrics_text.set("Calculando segmentación local experimental…")
+        self.root.after(50, lambda: self.finish_local_preview(token, future))
+
+    def finish_local_preview(self, token, future):
+        if token != getattr(self, "local_preview_token", None):
+            return
+        if not future.done():
+            self.root.after(50, lambda: self.finish_local_preview(token, future))
+            return
+        try:
+            result = future.result()
+            self.current_local_result = result
+            self.current_processed = result.get("processed_image")
+            self.current_prediction = result["mask"]
+            self.redraw_slice_overlay()
+            self.update_slice_metrics()
+            if result["failed_candidates"]:
+                self.append_log(f"Método local: {result['failed_candidates']} candidatos fallidos; no se aplicó otro método.")
+            self.refresh_steps()
+        except Exception as exc:
+            self.current_prediction = None
+            self.metrics_text.set("Falló la segmentación local; consultar el registro.")
+            self.append_log(f"Segmentación local: {exc}")
 
     def apply_preprocessing(self) -> None:
         self.show_case_slice(segment=False)
@@ -704,32 +923,48 @@ class TpiLauncher:
         self.show_case_slice(segment=True)
 
     def show_case_slice(self, segment: bool = False) -> None:
+        self.local_preview_token = getattr(self, "local_preview_token", 0) + 1
+        self.current_local_result = None
         if self.case_volume is None or self.case_labels is None:
             return
         k = max(0, min(int(self.slice_var.get()), self.case_volume.shape[2] - 1))
         self.slice_var.set(k)
         self.current_hu = self.case_volume[:, :, k]
         self.current_labels = self.case_labels[:, :, k]
+        self.current_processed = None
+        variant_label = "baseline"
         try:
             config, settings = self.current_settings()
-            self.current_processed = prepare_denoised_slice(self.current_hu, config)
-            self.current_processed = enhance(self.current_processed, config.get("preprocessing", {}).get("enhancement", {}))
             liver = self.current_labels > 0
-            self.current_prediction = segment_slice(self.current_processed, liver, settings)
+            detector = config.get("detection", {})
+            if detector.get("enabled"):
+                method = detector.get("method", "hysteresis")
+                configured_local = method.startswith("local_") and config.get("local_pipeline") == "configured"
+                variant_label = ("Preprocesamiento configurado / " if configured_local else "HU originales / ") + method
+                if method.startswith("local_"):
+                    self.current_prediction = None
+                    self.start_local_preview(config, settings, k, self.local_preview_token)
+                else:
+                    self.current_prediction = configured_prediction(self.current_hu, liver, self.case_spacing, config, settings)["mask"]
+            else:
+                variant_label = settings["method"]
+                self.current_processed = prepare_enhanced_slice(self.current_hu, config, liver_mask=liver)
+                self.current_prediction = segment_slice(self.current_processed, liver, settings)
         except (ValueError, KeyError) as exc:
             self.current_prediction = None
+            variant_label = "parámetros inválidos"
             self.append_log(f"Parámetros inválidos: {exc}")
         self.figure_index = -1
-        self.figure_title.set(f"Caso {self.selected_case_id():03d} · corte {k}")
+        self.figure_title.set(f"Caso {self.selected_case_id():03d} · corte {k} · {variant_label}")
         self.figure_fit = True
-        source = self.current_hu if self.view_mode.get() == "Antes" or self.current_processed is None else self.current_processed
-        self.draw_case_image(source)
+        self.redraw_slice_overlay()
         if self.current_prediction is not None:
             self.update_slice_metrics()
         self.refresh_steps()
 
     def refresh_steps(self) -> None:
-        states = (self.case_volume is not None, self.current_processed is not None,
+        prepared = self.current_processed is not None or self.current_prediction is not None
+        states = (self.case_volume is not None, prepared,
                   self.current_prediction is not None, bool(self.results_dir and self.results_dir.is_dir()))
         labels = ("Caso", "Preparar", "Segmentar", "Resultados")
         self.steps_text.set("  ·  ".join(("✓ " if done else "○ ") + label
@@ -745,11 +980,14 @@ class TpiLauncher:
                 source = source[x0:x1, y0:y1]
             except ValueError:
                 pass
-        low, high = np.nanpercentile(source, (1, 99)) if np.isfinite(source).any() else (0, 1)
-        gray = np.clip((source - low) / max(high - low, 1e-6), 0, 1)
+        x0, y0, x1, y1 = self.current_crop_box
+        liver = self.current_labels[x0:x1, y0:y1] > 0
+        if image is not self.current_processed:
+            # Map raw HU to grayscale for display only, using the same range as the no-window input.
+            source = normalize_slice_hu(source, {"enabled": False}, liver_mask=liver)
+        gray = np.clip(np.where(liver, source, 0), 0, 1)
         rgb = np.repeat((gray * 255).astype(np.uint8)[..., None], 3, axis=2)
         opacity = max(0.0, min(1.0, float(self.overlay_opacity.get())))
-        x0, y0, x1, y1 = self.current_crop_box
         if self.view_mode.get() == "Overlay":
             if self.show_reference.get():
                 mask = (self.current_labels == 2)[x0:x1, y0:y1]
@@ -757,6 +995,17 @@ class TpiLauncher:
             if self.show_prediction.get() and self.current_prediction is not None:
                 mask = self.current_prediction[x0:x1, y0:y1]
                 rgb[mask] = (rgb[mask] * (1 - opacity) + np.array((255, 155, 40)) * opacity).astype(np.uint8)
+            result = getattr(self, "current_local_result", None)
+            if result is not None and self.local_overlays.get():
+                candidate = result["candidates"][x0:x1, y0:y1]
+                edge = candidate & ~ndimage.binary_erosion(candidate)
+                rgb[edge] = (180, 80, 255)
+                seed = result["seeds"][x0:x1, y0:y1]
+                rgb[seed] = (80, 255, 80)
+        if self.show_liver_mask.get():
+            liver = self.current_labels > 0
+            boundary = liver & ~ndimage.binary_erosion(liver)
+            rgb[boundary[x0:x1, y0:y1]] = (255, 221, 80)
         self.figure_image = Image.fromarray(rgb.transpose(1, 0, 2))
         self.figure_photo = None
         self.empty_message = ""
@@ -767,7 +1016,10 @@ class TpiLauncher:
         prediction = self.current_prediction
         reference = self.current_labels == 2
         labels, count = ndimage.label(prediction, structure=np.ones((3, 3), dtype=bool))
-        self.metrics_text.set(f"Dice {dice_score(prediction, reference):.3f} · IoU {iou_score(prediction, reference):.3f} · área {int(prediction.sum())} px · lesiones {count}")
+        coverage = reference_coverage(prediction, reference)
+        coverage_text = (f"{coverage:.1%} ({int((prediction & reference).sum())}/{int(reference.sum())} px)"
+                         if np.isfinite(coverage) else "— (sin referencia tumoral)")
+        self.metrics_text.set(f"Cobertura referencia: {coverage_text}\nDice {dice_score(prediction, reference):.3f} · IoU {iou_score(prediction, reference):.3f} · área {int(prediction.sum())} px · lesiones {count}")
         for item in self.lesion_table.get_children():
             self.lesion_table.delete(item)
         for lesion in range(1, count + 1):
@@ -786,7 +1038,10 @@ class TpiLauncher:
         x = int((self.figure_canvas.canvasx(event.x) - left) / max(self.figure_scale, 1e-6)) + x0
         y = int((self.figure_canvas.canvasy(event.y) - top) / max(self.figure_scale, 1e-6)) + y0
         if 0 <= x < self.current_hu.shape[0] and 0 <= y < self.current_hu.shape[1]:
-            self.pixel_status.set(f"Píxel: ({x}, {y})   HU: {self.current_hu[x, y]:.1f}")
+            value = f"Píxel: ({x}, {y})   HU: {self.current_hu[x, y]:.6g}"
+            if self.view_mode.get() != "Antes" and self.current_processed is not None:
+                value += f"   Entrada: {self.current_processed[x, y]:.9g}"
+            self.pixel_status.set(value)
 
     def zoom_100(self) -> None:
         if self.figure_image is not None:
@@ -888,9 +1143,12 @@ class TpiLauncher:
         self.figure_counter = tk.StringVar(value="Sin imagen")
         ttk.Label(toolbar, textvariable=self.figure_counter, style="Viewer.TLabel").pack(side="left")
         self.view_toggle = ttk.Combobox(toolbar, textvariable=self.view_mode,
-                                        values=("Overlay", "Antes", "Después"), state="readonly", width=10)
+                                        values=("Entrada", "Antes", "Overlay"), state="readonly", width=10)
         self.view_toggle.pack(side="right", padx=(5, 0))
-        self.view_toggle.bind("<<ComboboxSelected>>", lambda _event: self.show_case_slice())
+        self.view_toggle.bind("<<ComboboxSelected>>", lambda _event: (
+            self.redraw_slice_overlay() if self.current_hu is not None else self.show_case_slice()))
+        ttk.Checkbutton(toolbar, text="Contorno hepático", variable=self.show_liver_mask,
+                        command=self.redraw_slice_overlay).pack(side="right", padx=5)
         ttk.Button(toolbar, text="100%", style="Secondary.TButton", command=self.zoom_100).pack(side="right", padx=3)
         ttk.Button(toolbar, text="Ajustar", style="Secondary.TButton", command=self.fit_figure).pack(side="right", padx=3)
         ttk.Button(toolbar, text="+", width=3, style="Secondary.TButton", command=lambda: self.zoom_figure(1.25)).pack(side="right", padx=3)
@@ -1235,6 +1493,7 @@ class TpiLauncher:
 
     def reset_results_view(self, message: str) -> None:
         """Clear displayed results without deleting prior files from disk."""
+        self.local_preview_token = getattr(self, "local_preview_token", 0) + 1
         self.results_dir = None
         self.figures = []
         self.results_files = []
@@ -1595,6 +1854,9 @@ class TpiLauncher:
             if not messagebox.askyesno("Ejecución en curso", "¿Cerrar y detener la ejecución actual?"):
                 return
             self.process.terminate()
+        self.local_preview_token = getattr(self, "local_preview_token", 0) + 1
+        if hasattr(self, "local_executor"):
+            self.local_executor.shutdown(wait=False, cancel_futures=True)
         self.root.destroy()
 
 

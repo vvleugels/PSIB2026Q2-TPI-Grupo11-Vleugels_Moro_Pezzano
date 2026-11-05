@@ -1,0 +1,9 @@
+detection:
+  enabled: true
+  method: local_growth
+  high: 2.0
+  polarity: dark
+  context: true
+  refinement: 2.0
+
+local_pipeline: configured
