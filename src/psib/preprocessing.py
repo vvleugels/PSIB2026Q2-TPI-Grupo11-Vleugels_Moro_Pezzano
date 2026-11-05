@@ -67,7 +67,7 @@ def denoise(image: np.ndarray, settings: Mapping[str, Any]) -> np.ndarray:
     if method == "median":
         return denoise_median(image, int(settings.get("median_size", 3)))
     if method == "gaussian":
-        return denoise_gaussian(image, float(settings.get("gaussian_sigma", 0.3)))
+        return denoise_gaussian(image, float(settings.get("gaussian_sigma", 0.6)))
     if method == "mean":
         return denoise_mean(image, int(settings.get("mean_size", 3)))
     raise ValueError(f"Unknown denoising method {method!r}; use none, bilateral, gaussian, or mean")

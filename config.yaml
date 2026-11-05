@@ -42,8 +42,7 @@ preprocessing:
     width: 150
   denoising:
     method: gaussian
-    gaussian_sigma: 0.3
-    mean_size: 3
+    gaussian_sigma: 0.6
   enhancement:
     method: clahe
     clahe_clip_limit: 0.01
@@ -55,13 +54,24 @@ edge_analysis:
   sharpen_alpha: 0.5
 
 segmentation:
-  method: global
+  method: otsu
   threshold: 0.45
   k: 1.0
   direction: lower
-  opening: false
-  closing: false
-  fill_holes: false
+  opening: true
+  closing: true
+  fill_holes: true
   footprint: disk
-  radius: 1
-  min_area: 0
+  radius: 2
+  min_area: 10
+
+# Experimental: opt in; defaults are not promoted by a parameter sweep.
+detection:
+  enabled: false
+  method: hysteresis
+  sigma_mm: 0.6
+  background_sigma_mm: 10.0
+  noise_floor_hu: 5.0
+  high: 1.0
+  low: 0.33
+  min_area_mm2: 1.0

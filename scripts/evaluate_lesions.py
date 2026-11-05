@@ -16,7 +16,7 @@ import pandas as pd
 
 from psib.config import load_config
 from psib.data_io import iter_case_slices
-from psib.lesion_eval import match_lesions
+from psib.lesion_eval import match_lesions, match_lesions_one_to_one
 
 
 SIZE_CLASSES = ("<10", "10-20", ">=20")
@@ -26,7 +26,11 @@ def resolve_configuration(run_dir: Path, configuration_id: str) -> str:
     configs_path = run_dir / "configurations.csv"
     configs = pd.read_csv(configs_path)
     if configuration_id == "best":
+        if (run_dir / "folds.json").exists():
+            raise ValueError("La validación anidada tiene una configuración por fold; indique un ID explícito.")
         best_path = run_dir / "best_configurations.csv"
+        if "detector_settings" in configs and len(configs) > 1 and not best_path.exists():
+            raise ValueError("No hay ganador factible del detector; indique un ID explícito.")
         candidates = pd.read_csv(best_path) if best_path.is_file() else pd.read_csv(run_dir / "summary.csv")
         winner = candidates.sort_values(["dice_mean", "iou_mean", "configuration_id"],
                                         ascending=[False, False, True]).iloc[0]
@@ -45,7 +49,7 @@ def _case_detection_summary(matches: pd.DataFrame, case_ids) -> pd.DataFrame:
         fn = int((group.status == "FN").sum())
         precision = tp / (tp + fp) if tp + fp else np.nan
         recall = tp / (tp + fn) if tp + fn else np.nan
-        f1 = 2 * precision * recall / (precision + recall) if np.isfinite(precision + recall) and precision + recall else np.nan
+        f1 = 2 * tp / (2 * tp + fp + fn) if 2 * tp + fp + fn else np.nan
         rows.append({"case_id": int(case_id), "TP": tp, "FP": fp, "FN": fn,
                      "precision": precision, "recall": recall, "F1": f1})
     return pd.DataFrame(rows, columns=("case_id", "TP", "FP", "FN", "precision", "recall", "F1"))
@@ -88,6 +92,7 @@ def evaluate(run_dir: Path, data_dir: Path, min_iou: float = 0.0,
         raise ValueError("La selección debe tener filas y columnas case_id/slice_index.")
 
     rows = []
+    one_to_one_rows = []
     for case_id, selected in selection.groupby("case_id", sort=True):
         indices = sorted(pd.to_numeric(selected.slice_index, errors="raise").astype(int).unique())
         expected = set(indices)
@@ -104,6 +109,11 @@ def evaluate(run_dir: Path, data_dir: Path, min_iou: float = 0.0,
                 continue
             groups = match_lesions(predictions[slice_index], segmentation == 2,
                                    spacing[:2], min_iou=min_iou)
+            for criterion in (.10, .25):
+                exact = match_lesions_one_to_one(predictions[slice_index], segmentation == 2,
+                                                 spacing[:2], min_iou=criterion)
+                one_to_one_rows.extend({"case_id": int(case_id), "slice_index": slice_index,
+                                       "min_iou": criterion, **item} for item in exact.to_dict("records"))
             for item in groups.to_dict("records"):
                 rows.append({"case_id": int(case_id), "slice_index": slice_index,
                              "min_iou": min_iou, **item})
@@ -121,6 +131,17 @@ def evaluate(run_dir: Path, data_dir: Path, min_iou: float = 0.0,
          for size in SIZE_CLASSES], columns=("scope", "size_class", "metric", "n", "value"))
 
     output.mkdir(parents=True)
+    exact = pd.DataFrame(one_to_one_rows, columns=("case_id", "slice_index", "min_iou", "reference_id",
+        "predicted_id", "status", "iou", "diameter_ref_mm", "size_class"))
+    exact.to_csv(output / "one_to_one_matches.csv", index=False)
+    exact_cases = []
+    for criterion in (.10, .25):
+        table = _case_detection_summary(exact[exact.min_iou == criterion], selection.case_id.unique())
+        table["min_iou"] = criterion
+        table["n_slices"] = table.case_id.map(selection.groupby("case_id").size())
+        table["fp_per_slice"] = table.FP / table.n_slices
+        exact_cases.append(table)
+    pd.concat(exact_cases).to_csv(output / "one_to_one_per_case.csv", index=False)
     matches.to_csv(output / "lesion_matches.csv", index=False)
     cases.to_csv(output / "detection_per_case.csv", index=False)
     summary.to_csv(output / "detection_summary.csv", index=False)

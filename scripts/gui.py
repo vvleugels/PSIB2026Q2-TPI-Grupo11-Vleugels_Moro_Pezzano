@@ -27,8 +27,9 @@ from psib.config import load_config
 from psib.gui_model import ProfileStore, SidebarState, SECTIONS
 from psib.data_io import list_cases, load_case, iter_case_slices
 from psib.preprocessing import prepare_denoised_slice, enhance, liver_bounding_box
+from psib.detection import configured_prediction
 from psib.segmentation import segment_slice
-from psib.metrics import dice_score, iou_score
+from psib.metrics import dice_score, iou_score, reference_coverage
 from psib.app_icon import load_icon_images, warn_icon_once
 from scipy import ndimage
 
@@ -293,6 +294,8 @@ class TpiLauncher:
 
     def build_preprocessing_section(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Preprocesamiento", style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 8))
+        ttk.Label(parent, text="Con detector HU activo, estos controles cambian solo la visualización.",
+                  wraplength=280).pack(anchor="w", pady=(0, 6))
         cfg = load_config(DEFAULT_CONFIG)
         prep = cfg.get("preprocessing", {})
         window = prep.get("hu_window", {})
@@ -304,7 +307,7 @@ class TpiLauncher:
             denoise_method = "bilateral"
         parameter_keys = {"bilateral": "bilateral_sigma_color", "gaussian": "gaussian_sigma",
                           "mean": "mean_size"}
-        parameter_defaults = {"bilateral": 0.08, "gaussian": 0.3, "mean": 3}
+        parameter_defaults = {"bilateral": 0.08, "gaussian": 0.6, "mean": 3}
         parameter_key = parameter_keys.get(denoise_method, "bilateral_sigma_color")
         parameter_default = parameter_defaults.get(denoise_method, 0.08)
         self.preprocessing_vars = {
@@ -337,6 +340,20 @@ class TpiLauncher:
     def build_segmentation_section(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Segmentación 2D", style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 8))
         defaults = load_config(DEFAULT_CONFIG).get("segmentation", {})
+        detection = load_config(DEFAULT_CONFIG).get("detection", {})
+        self.detection_enabled = tk.BooleanVar(value=detection.get("enabled", False))
+        self.detection_method = tk.StringVar(value=detection.get("method", "hysteresis"))
+        ttk.Checkbutton(parent, text="Detector HU experimental (prioriza sensibilidad)",
+                        variable=self.detection_enabled).pack(anchor="w")
+        self.labeled_combo(parent, "Salida del detector", self.detection_method, ("hysteresis", "watershed"))
+        self.detection_vars = {}
+        for key, label, default in (("sigma_mm", "Suavizado (mm)", 0.6),
+                                     ("high", "Umbral de semillas", 1.0),
+                                     ("low", "Umbral de crecimiento", 0.5),
+                                     ("min_area_mm2", "Área mínima detector (mm²)", 0.0)):
+            self.detection_vars[key] = tk.StringVar(value=str(detection.get(key, default)))
+            self.labeled_entry(parent, label, self.detection_vars[key])
+        ttk.Label(parent, text="Controles siguientes: baseline histórico").pack(anchor="w")
         self.segmentation_vars = {
             "method": tk.StringVar(value=str(defaults.get("method", "global"))),
             "threshold": tk.StringVar(value=str(defaults.get("threshold", 0.45))),
@@ -346,8 +363,8 @@ class TpiLauncher:
             "closing": tk.BooleanVar(value=bool(defaults.get("closing", False))),
             "fill_holes": tk.BooleanVar(value=bool(defaults.get("fill_holes", False))),
             "footprint": tk.StringVar(value=str(defaults.get("footprint", "disk"))),
-            "radius": tk.StringVar(value=str(defaults.get("radius", 1))),
-            "min_area": tk.StringVar(value=str(defaults.get("min_area", 0))),
+            "radius": tk.StringVar(value=str(defaults.get("radius", 2))),
+            "min_area": tk.StringVar(value=str(defaults.get("min_area", 10))),
         }
         self.labeled_combo(parent, "Método", self.segmentation_vars["method"], ("global", "otsu", "statistical"))
         self.labeled_entry(parent, "Umbral [0–1]", self.segmentation_vars["threshold"])
@@ -367,7 +384,7 @@ class TpiLauncher:
         self.labeled_entry(parent, "Opacidad máscara (0–1)", self.overlay_opacity)
         ttk.Button(parent, text="Segmentar corte actual", style="Secondary.TButton",
                    command=self.segment_current_slice).pack(fill="x", pady=(6, 7))
-        self.metrics_text = tk.StringVar(value="Dice —  ·  IoU —  ·  área —  ·  lesiones —")
+        self.metrics_text = tk.StringVar(value="Cobertura referencia —\nDice —  ·  IoU —  ·  área —  ·  lesiones —")
         ttk.Label(parent, textvariable=self.metrics_text, style="Body.TLabel", wraplength=280).pack(fill="x")
         columns = ("lesion", "area", "centroid")
         self.lesion_table = ttk.Treeview(parent, columns=columns, show="headings", height=4)
@@ -695,6 +712,9 @@ class TpiLauncher:
         segment["k"] = float(segment["k"])
         segment["radius"] = int(segment["radius"])
         segment["min_area"] = int(segment["min_area"])
+        config.setdefault("detection", {}).update(enabled=self.detection_enabled.get(),
+                                                  method=self.detection_method.get(),
+                                                  **{key: float(value.get()) for key, value in self.detection_vars.items()})
         return config, segment
 
     def apply_preprocessing(self) -> None:
@@ -710,17 +730,20 @@ class TpiLauncher:
         self.slice_var.set(k)
         self.current_hu = self.case_volume[:, :, k]
         self.current_labels = self.case_labels[:, :, k]
+        variant_label = "baseline"
         try:
             config, settings = self.current_settings()
+            if config.get("detection", {}).get("enabled"):
+                variant_label = "HU / " + config["detection"].get("method", "hysteresis")
             self.current_processed = prepare_denoised_slice(self.current_hu, config)
             self.current_processed = enhance(self.current_processed, config.get("preprocessing", {}).get("enhancement", {}))
             liver = self.current_labels > 0
-            self.current_prediction = segment_slice(self.current_processed, liver, settings)
+            self.current_prediction = configured_prediction(self.current_hu, liver, self.case_spacing, config, settings)["mask"]
         except (ValueError, KeyError) as exc:
             self.current_prediction = None
             self.append_log(f"Parámetros inválidos: {exc}")
         self.figure_index = -1
-        self.figure_title.set(f"Caso {self.selected_case_id():03d} · corte {k}")
+        self.figure_title.set(f"Caso {self.selected_case_id():03d} · corte {k} · {variant_label}")
         self.figure_fit = True
         source = self.current_hu if self.view_mode.get() == "Antes" or self.current_processed is None else self.current_processed
         self.draw_case_image(source)
@@ -767,7 +790,10 @@ class TpiLauncher:
         prediction = self.current_prediction
         reference = self.current_labels == 2
         labels, count = ndimage.label(prediction, structure=np.ones((3, 3), dtype=bool))
-        self.metrics_text.set(f"Dice {dice_score(prediction, reference):.3f} · IoU {iou_score(prediction, reference):.3f} · área {int(prediction.sum())} px · lesiones {count}")
+        coverage = reference_coverage(prediction, reference)
+        coverage_text = (f"{coverage:.1%} ({int((prediction & reference).sum())}/{int(reference.sum())} px)"
+                         if np.isfinite(coverage) else "— (sin referencia tumoral)")
+        self.metrics_text.set(f"Cobertura referencia: {coverage_text}\nDice {dice_score(prediction, reference):.3f} · IoU {iou_score(prediction, reference):.3f} · área {int(prediction.sum())} px · lesiones {count}")
         for item in self.lesion_table.get_children():
             self.lesion_table.delete(item)
         for lesion in range(1, count + 1):

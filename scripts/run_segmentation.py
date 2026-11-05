@@ -13,6 +13,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 import matplotlib
@@ -27,7 +28,7 @@ from psib.config import load_config
 from psib.data_io import iter_case_slices
 from psib.edge_analysis import (edge_map, measure_edge_metrics, sharpen_with_laplacian,
                                 watershed_refine)
-from psib.metrics import dice_score, iou_score
+from psib.metrics import dice_score, iou_score, reference_coverage
 from psib.preprocessing import apply_hu_window, enhance, prepare_denoised_slice
 from psib.segmentation import _validate_settings, segment_slice
 
@@ -154,10 +155,13 @@ def aggregate_metrics(slices):
     scores = [scores_from_counts(*(getattr(row, key) for key in COUNT_COLUMNS))
               for row in cases.itertuples(index=False)]
     cases["dice"], cases["iou"] = np.asarray(scores).T
+    cases["reference_coverage"] = cases.intersection / cases.reference_area.replace(0, np.nan)
     summary = cases.groupby("configuration_id", sort=True).agg(
         n_cases=("case_id", "size"), dice_mean=("dice", "mean"),
         dice_std=("dice", lambda x: x.std(ddof=0)), iou_mean=("iou", "mean"),
-        iou_std=("iou", lambda x: x.std(ddof=0))).reset_index()
+        iou_std=("iou", lambda x: x.std(ddof=0)),
+        reference_coverage_mean=("reference_coverage", "mean"),
+        reference_coverage_n_cases=("reference_coverage", "count")).reset_index()
     return cases, summary
 
 
@@ -235,7 +239,7 @@ def export_slice_comparison(out, configuration_id, case_id, k, original, denoise
     if operator == "sobel":
         panels = common + [
             (response, "Sobel gradient", "magma", (0, max(float(np.percentile(response, 99)), 1e-6))),
-            (watershed_labels, "Sobel watershed", "nipy_spectral", None),
+            (prediction, "Final mask (before watershed)", "gray", (0, 1)),
             (reference, "Tumor reference", "gray", (0, 1)),
             (watershed_prediction, "Watershed prediction", "gray", (0, 1)),
         ]
@@ -270,6 +274,9 @@ def export_slice_comparison(out, configuration_id, case_id, k, original, denoise
         for ax in list(axes.flat)[len(panels):]:
             ax.axis("off")
         details = f"Dice={dice_score(prediction, reference):.4f}; IoU={iou_score(prediction, reference):.4f}"
+        coverage = reference_coverage(prediction, reference)
+        details += (f"; Ref. coverage={coverage:.1%}" if np.isfinite(coverage)
+                    else "; Ref. coverage=N/A (no tumor reference)")
         if watershed_prediction is not None:
             details += f"; watershed Dice={dice_score(watershed_prediction, reference):.4f}"
         figure.suptitle(f"Case {case_id} / slice {k} / {configuration_id} / {operator} — {details}")
@@ -307,6 +314,9 @@ def run_experiment(config_path, run_id, sweep=False):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", run_id):
         raise ValueError("run-id solo admite letras ASCII, números, guiones y guiones bajos.")
     cfg = load_config(config_path)
+    if cfg.get("detection", {}).get("enabled", False):
+        from scripts.run_detection import run_experiment as run_detection
+        return run_detection(config_path, run_id, sweep=sweep)
     out = Path(cfg["_output_dir"]) / "segmentation" / run_id
     out.parent.mkdir(parents=True, exist_ok=True)
     out.mkdir()  # Exclusive: never overwrite a previous run, even a failed one.
@@ -377,7 +387,8 @@ def run_experiment(config_path, run_id, sweep=False):
                                          "pred_area": int(pred.sum()), "reference_area": int(reference.sum()),
                                          "intersection": int(np.count_nonzero(pred & reference)),
                                          "union": int(np.count_nonzero(pred | reference)),
-                                         "dice": dice_score(pred, reference), "iou": iou_score(pred, reference)})
+                                         "dice": dice_score(pred, reference), "iou": iou_score(pred, reference),
+                                         "reference_coverage": reference_coverage(pred, reference)})
                             edge_row = {
                                 "configuration_id": cid, "case_id": case_id, "slice_index": k,
                                 "edge_operator": edge_operator,

@@ -174,7 +174,7 @@ plano; los controles visibles se guardan en un YAML local ignorado por Git para
 que el pipeline use la misma configuración.
 
 El preset inicial es ventana HU (centro 30, ancho 150), CLAHE, filtro gaussiano
-de baja frecuencia (`sigma=0.3`) y Sobel de alta frecuencia. El orden aplicado
+de baja frecuencia (`sigma=0.6`) y Sobel de alta frecuencia. El orden aplicado
 en la vista previa y en la segmentación por lote es: ventana HU → ecualización
 → filtro de baja frecuencia → filtro de alta frecuencia. Se puede elegir
 `none`, bilateral, gaussiano o media para denoising; `none`, ecualización de
@@ -295,7 +295,7 @@ Valores del YAML base:
 | `preprocessing.hu_window.center` | 30 | Centro HU |
 | `preprocessing.hu_window.width` | 150 | Ancho HU |
 | `preprocessing.denoising.method` | `gaussian` | Filtro activo |
-| `preprocessing.denoising.gaussian_sigma` | 0.3 | Sigma gaussiano en píxeles |
+| `preprocessing.denoising.gaussian_sigma` | 0.6 | Sigma gaussiano en píxeles |
 | `preprocessing.denoising.bilateral_sigma_color` | 0.08 | Sigma de intensidad normalizada al elegir bilateral |
 | `preprocessing.denoising.bilateral_sigma_spatial` | 3.0 | Sigma espacial al elegir bilateral |
 | `preprocessing.denoising.mean_size` | 3 | Ventana impar del filtro de media |
@@ -591,8 +591,8 @@ tumoral.
 | `closing` | `False` | Booleano |
 | `fill_holes` | `False` | Booleano |
 | `footprint` | `disk` | `disk`, `square` |
-| `radius` | 1 | Entero positivo |
-| `min_area` | 0 | Entero no negativo, en píxeles; 0 desactiva el filtro |
+| `radius` | 2 | Entero positivo |
+| `min_area` | 10 | Entero no negativo, en píxeles; 0 desactiva el filtro |
 
 Un diccionario vacío utiliza todos los valores predeterminados. Las claves
 desconocidas y los valores inválidos generan `ValueError`, incluso si el
@@ -1290,3 +1290,66 @@ destino, directorio de trabajo, icono y estado minimizado sin requerir permisos
 de administrador. Los accesos directos son locales e ignorados por Git. En
 Linux, completar `<project-root>` en `scripts/psib.desktop.template`; el campo
 `Icon` apunta al PNG de 256 px.
+
+## Detector clásico experimental en HU (noviembre de 2026)
+
+La opción `detection.enabled: true` activa una ruta automática que busca lesiones
+hipodensas dentro de la máscara hepática conocida. `detect_slice(hu, liver_mask,
+spacing_mm, settings)` devuelve `mask`, `candidates`, `seeds`, `score`, registros
+`components`, motivos de `fallback` y `effective_parameters`. La máscara tumoral
+no forma parte de sus argumentos. El resultado de esa ruta se comparte entre
+vista previa, ejecutor 2D y apilado 3D.
+
+El suavizado es Gaussiano normalizado por el soporte hepático, en mm, para evitar
+que el exterior contamine el borde de la ROI. Se compara cada píxel con la mediana
+hepática y con un fondo local Gaussiano de 10 mm. La puntuación es el máximo de
+ambas diferencias dividido por `max(1.4826*MAD, 5 HU)`, calculado en la imagen
+suavizada. Es una adaptación experimental, no una reproducción de resultados de
+un artículo ni un clasificador aprendido.
+
+Un umbral alto genera semillas y otro bajo define candidatos permisivos. La
+histéresis conserva componentes 8-conectados que incluyen alguna semilla. La
+alternativa watershed usa el gradiente físico de HU, marcadores positivos y
+marcadores de fondo dentro de cada región hepática conectada. Si falta una clase
+de marcadores, conserva la histéresis y registra el motivo. No se aplica apertura,
+relleno de agujeros, descarte por borde o por forma. Solo se compara área mínima
+0/3 mm². Los controles de ventana, CLAHE y denoising visual no cambian esta máscara.
+
+El barrido de 48 configuraciones combina sigma 0,6/1 mm, alto 1/1,5/2, bajo
+0,5/0,75, área mínima 0/3 mm² e histéresis/watershed. Los defaults siguen
+experimentales y no se reemplazan automáticamente por el ganador de un barrido.
+
+El comando `scripts/run_detection.py --benchmark --run-id <nuevo-id>
+--historical-run <carpeta-corrida-histórica>` congela diez pacientes y sus cortes
+antes de puntuar. Guarda cinco folds externos de dos pacientes y cuatro folds
+internos para los otros ocho (semilla 2026). Como no hay modelo entrenado, evaluar
+cada configuración fija en las cuatro particiones internas equivale a obtener
+una predicción de validación por paciente interno. No se consulta el resultado
+externo para elegir parámetros.
+
+El emparejamiento de lesiones maximiza primero la cardinalidad de pares válidos
+y luego su IoU. Un componente fusionado puede emparejarse con una sola referencia;
+los fragmentos adicionales pueden contar como FP. Los grupos de fusiones y
+divisiones del evaluador anterior se conservan separadamente para geometría.
+Los umbrales de correspondencia son 0,10 (principal) y 0,25 (sensibilidad del
+criterio). Las métricas principales son recall por lesión, recall <10 mm y FP por
+corte, además de Dice/IoU, precisión y F1.
+
+La selección interna maximiza recall bajo presupuestos 1/2/4/8 FP por corte,
+desempata por menos FP, mayor Dice y finalmente ID. Sin configuración factible,
+registra abstención y cuenta las referencias externas como FN. En los pacientes
+externos se informa la tasa real de FP, incluso si excede el presupuesto interno.
+La elegibilidad para promover exige mayor recall que ambos baselines, no perder
+recall pequeño y no superar 8 FP/corte externos. La decisión nunca modifica YAML.
+
+Las máscaras se guardan por variante en `.npy`; los diagnósticos incluyen área,
+contraste, centroide, motivo de descarte y fallbacks. El resumen anidado no tiene
+un único ganador global: las herramientas posteriores requieren un ID explícito.
+Para reproducir una evaluación por fold se deben usar los IDs de
+`selected_configurations.csv` con los pacientes de `folds.json`.
+
+La extensión 3D del detector apila las mismas máscaras sin eliminar componentes
+3D adicionales. Reconstrucción usa HU originales/reconstruidos; compresión usa HU
+recuperados de la ventana cuantizada a ocho bits, cuyo control no es la TC original.
+Las corridas existentes permanecen conservadas. Ver README para comandos y nombres
+de las tablas de evaluación.

@@ -120,7 +120,7 @@ The viewer supports previous/next, fit, 100%, zoom, pan, and overlay / before /
 after display. Pixel coordinates and HU values appear in the bottom status bar.
 
 The default image-processing preset is HU windowing (center 30, width 150),
-CLAHE equalization, Gaussian low-pass denoising (sigma 0.3), then Sobel
+CLAHE equalization, Gaussian low-pass denoising (sigma 0.6), then Sobel
 high-pass filtering. In **Preprocesamiento**, denoising can be set to none,
 bilateral, Gaussian, or mean; equalization to none, histogram equalization, or
 CLAHE; and the edge filter to none, Sobel, Prewitt, or Laplacian. The same
@@ -527,3 +527,134 @@ Tests use small synthetic datasets and do not require local CT files. They
 cover loading, stratified and legacy selection, preprocessing, segmentation,
 metrics, filter comparison, compression and reconstruction helpers, 2D geometry/texture, and launcher data fallback/timestamp behavior. The synthetic
 launcher test exercises the Python workflow; it does not execute Windows CMD.
+
+## Experimental HU detector (automatic, no trained model)
+
+Opt in with `detection.enabled: true` in a complete config, or the **Detector HU
+experimental** checkbox in the GUI. The existing defaults remain historical.
+`run_tpi.py` and `run_segmentation.py` dispatch to the same detector used in the
+preview and volumetric evaluation. `detection.method` selects `hysteresis` or
+`watershed`; that selected mask is saved, displayed and measured.
+
+Analysis uses HU independently of display window/CLAHE. Mask-normalized Gaussian
+smoothing uses `sigma_mm`; a 10 mm local background and the liver median supply
+a darkness score normalized by `max(1.4826*MAD, noise_floor_hu)`. `high` creates
+seeds and `low` permits connected growth. All connectivity is 8-neighbor in 2D.
+Watershed uses the same seeds and low-threshold background on the physical HU
+gradient, with a documented hysteresis fallback for missing marker classes.
+`min_area_mm2` is the only removal rule; no opening, border exclusion, shape
+filter or largest-component selection is applied. Inputs to the detector are
+HU, a known binary liver mask, spacing and settings; never tumor references.
+
+```bash
+# Existing frozen slice selection, 48 experimental variants:
+.venv/bin/python scripts/run_detection.py --run-id detector-sweep --sweep
+
+# Freeze 10 patients / up to 5 stratified slices each, then compare 48 variants
+# plus historical and coherent Otsu baselines. Outputs never overwrite a run.
+.venv/bin/python scripts/run_detection.py --run-id detector-validation \
+  --benchmark --historical-run results/segmentation/20261103-135329
+```
+
+The benchmark saves `selected_cases_slices.csv` and `folds.json` before scoring.
+Five outer folds hold out two patients each; four inner folds partition the
+remaining eight. These are fixed, non-fitted algorithms, so pooling their inner
+validation predictions evaluates each parameter configuration exactly once per
+training patient. No outer result participates in parameter choice.
+
+`detection_per_slice.csv` reports one-to-one lesion matching at IoU 0.10 and
+0.25, maximizing match cardinality before summed IoU. `selected_configurations.csv`
+contains a choice for each outer fold and FP budget (1/2/4/8 per slice). Selection
+maximizes lesion recall subject to the budget, then minimizes FP, then maximizes
+case-averaged Dice, with stable ID tie-breaking. If no configuration qualifies,
+the detector explicitly abstains (all reference lesions are FN), recorded in the
+selection table. Budgets are enforced on inner patients; realized outer FP rates
+are reported, not clipped or reselected.
+
+`validation_summary.csv`, `validation_per_case.csv`, `outer_per_slice.csv`,
+`inner_validation.csv` and `froc.png` report held-out results. Negatives contribute
+FP, but not lesion-recall denominators. Empty prediction/reference masks score
+Dice/IoU 1; undefined lesion precision/recall/F1 are NaN only when their count
+denominator is zero. `promotion.json` checks improvement over **both** baselines,
+no small-lesion recall loss and ≤8 outer FP/slice; it never edits defaults.
+
+The historical baseline is rerun with its saved configuration on the new frozen
+cohort (not compared by mixing different cohorts). The coherent Otsu control is
+the prior audit's Gaussian sigma=1 pixel, no equalization, opening disk radius=1
+pixel and minimum area=25 pixels; it is a fixed comparator, not an internally
+tuned competitor. All detector spatial parameters use physical units.
+
+Every variant saves full-size masks compatible with lesion evaluation and
+component diagnostics (area, contrast, centroid, rejection reason), plus
+per-slice effective parameters/fallback reasons. Single runs also save seeds,
+candidates, score maps and comparison figures. For nested runs use an explicit
+configuration ID in downstream evaluation: there is no global “best” model.
+`evaluate_lesions.py` retains split/merge geometry tables and additionally exports
+`one_to_one_matches.csv` and `one_to_one_per_case.csv`.
+
+The 3D extension stacks the exact detector masks with no extra 3D component
+removal. Legacy 3D reruns now use the same equalization as their saved 2D config;
+existing artifacts are untouched. Reconstruction routes the original and
+reconstructed HU through the detector when enabled. Compression analyzes HU
+restored from its known window and 8-bit quantization; its control is therefore
+the **windowed, quantized** image, not the original HU detector baseline.
+
+This is an experimental hypodense-lesion detector inside a reference liver ROI.
+Iso/hyperdense lesions remain in evaluation and are not silently excluded. Ten
+patients and reference-selected slices provide a small internal comparison, not
+external or full-volume validation. No claimed clinical accuracy follows from it.
+## Cobertura de la referencia
+
+La previsualización muestra **Cobertura referencia**: el porcentaje de píxeles
+tumorales de referencia incluidos en la predicción, junto con el conteo cubierto/total.
+Se calcula como `intersección / área de referencia`; 100 % significa que se cubrió
+toda la referencia, aunque puede haber falsos positivos. Complementa Dice e IoU
+y no equivale a sensibilidad por lesión. Sin referencia tumoral se muestra «—».
+
+Las nuevas figuras y corridas 2D (clásicas y detector HU) incluyen este indicador.
+En CSV, `reference_coverage` está en escala 0–1 y queda vacío si no hay referencia.
+Por paciente se divide la suma de intersecciones por la suma de áreas de referencia;
+`reference_coverage_mean` promedia pacientes con referencia y
+`reference_coverage_n_cases` informa cuántos contribuyen. No modifica predicciones
+ni resultados históricos. Reiniciar la GUI permite ver el nuevo indicador.
+
+## Búsqueda clásica genérica y uniones automáticas
+
+```bash
+.venv/bin/python scripts/run_classical_search.py --run-id classical-search-20261104
+# Para continuar una ejecución interrumpida con la misma configuración y selección:
+.venv/bin/python scripts/run_classical_search.py --run-id classical-search-20261104 --resume
+```
+
+Este ejecutor separado evalúa 216 combinaciones: tres ventanas HU, cuatro
+suavizados, tres ecualizaciones y seis perfiles de limpieza, siempre con Otsu.
+Usa por defecto los 50 cortes y folds congelados de
+`results/segmentation/classical-20261104/` (`--benchmark` permite indicar otra
+carpeta con ese mismo protocolo). El detector HU y los filtros de bordes no
+participan. El baseline se toma del `--config` actual, sin modificarlo.
+
+La selección maximiza F2 por lesión (IoU ≥0,10), con desempates por sensibilidad
+pequeña, menos FP/corte, Dice e ID. La unión comienza por la mejor variante
+individual y agrega como máximo dos variantes si F2 mejora estrictamente. Se
+recalculan los componentes y las correspondencias de cada máscara OR, sin
+limpieza posterior. El procedimiento se evalúa en pacientes retenidos, junto a
+la selección individual y a una alternativa de máxima sensibilidad. No hay un
+presupuesto obligatorio de falsos positivos.
+
+Los resultados se guardan en `results/classical_search/<run-id>/`: configuraciones
+completas, métricas internas/externas, trazas de unión, figuras del caso 94,
+comparación sensibilidad/FP y presets. Las máscaras individuales están en
+`predictions/case_XXX_slice_YYY.npy`: filas en el orden de `configurations.json`,
+seguidas por el default; cada fila contiene bits empaquetados con `np.packbits`.
+`inputs/` contiene forma del recorte, origen, forma completa, ROI, referencia y
+spacing para reconstruirlas. `case94/` incluye máscaras externas en tamaño
+completo. `presets/union.yaml` describe un OR de los YAML relativos listados, sin
+postprocesamiento; no es un YAML de configuración individual para la GUI.
+
+`validation_summary.csv` estima el procedimiento con pacientes retenidos;
+`exploratory_summary.csv` y `finalists.json` usan toda la cohorte y no son una
+validación independiente de los presets finales. Los pacientes ya fueron
+explorados: el estudio sigue siendo interno y exploratorio. Las figuras y los
+conteos externos utilizan exactamente las mismas máscaras. `--resume` reutiliza
+las máscaras completas y los conteos de uniones guardados; rechaza cambios en
+la configuración o en la selección congelada.

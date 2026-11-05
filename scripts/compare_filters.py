@@ -50,7 +50,7 @@ def compare_filters(config_path: str | Path = ROOT / "config.yaml") -> Path:
         f"No denoising (HU window)\ncenter={center:g}, width={width:g}",
         f"Bilateral\nσ color={float(filters.get('bilateral_sigma_color', 0.08)):g}, "
         f"σ spatial={float(filters.get('bilateral_sigma_spatial', 3.0)):g}",
-        f"Gaussian\nsigma={float(filters.get('gaussian_sigma', 0.3)):g}",
+        f"Gaussian\nsigma={float(filters.get('gaussian_sigma', 0.6)):g}",
         f"Mean\nsize={int(filters.get('mean_size', 3))}",
     )
     output = Path(cfg["_output_dir"]) / "figures" / (

@@ -23,7 +23,8 @@ class RunSegmentationTests(unittest.TestCase):
         self.output.mkdir()
         self.config = self.root / 'config.yaml'
         self.cfg = {'data_dir': 'data', 'output_dir': 'results',
-                    'preprocessing': {'denoising': {'method': 'median', 'median_size': 1}}}
+                    'preprocessing': {'denoising': {'method': 'median', 'median_size': 1}},
+                    'segmentation': {'min_area': 0}}
         self.config.write_text(yaml.safe_dump(self.cfg))
         ct = np.full((9, 9, 3), 60, dtype=np.int16)
         seg = np.zeros_like(ct, dtype=np.uint8)
