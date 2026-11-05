@@ -15,7 +15,7 @@ import pandas as pd
 
 from psib.config import load_config
 from psib.data_io import iter_case_slices
-from psib.preprocessing import apply_hu_window, denoise
+from psib.preprocessing import denoise, normalize_slice_hu
 
 
 def compare_filters(config_path: str | Path = ROOT / "config.yaml") -> Path:
@@ -36,18 +36,23 @@ def compare_filters(config_path: str | Path = ROOT / "config.yaml") -> Path:
 
     row = selected.iloc[0]
     case_id, slice_index = int(row.case_id), int(row.slice_index)
-    _, slice_hu, _, _ = next(iter_case_slices(case_id, [slice_index], cfg["data_dir"]))
+    _, slice_hu, labels, _ = next(iter_case_slices(case_id, [slice_index], cfg["data_dir"]))
+    liver = labels > 0
     settings = cfg.get("preprocessing", {})
     window = settings.get("hu_window", {})
-    center, width = float(window.get("center", 60)), float(window.get("width", 400))
-    windowed = apply_hu_window(slice_hu, center, width)
+    windowed = normalize_slice_hu(slice_hu, window, liver_mask=liver)
+    if window.get("enabled", True):
+        center, width = float(window.get("center", 60)), float(window.get("width", 400))
+        original_title = f"No denoising (HU window)\ncenter={center:g}, width={width:g}"
+    else:
+        original_title = "No denoising (liver intensity range)"
     filters = settings.get("denoising", {})
     images = [windowed] + [
-        denoise(windowed, {**filters, "method": method})
+        denoise(windowed, {**filters, "method": method}, liver_mask=liver)
         for method in ("bilateral", "gaussian", "mean")
     ]
     titles = (
-        f"No denoising (HU window)\ncenter={center:g}, width={width:g}",
+        original_title,
         f"Bilateral\nσ color={float(filters.get('bilateral_sigma_color', 0.08)):g}, "
         f"σ spatial={float(filters.get('bilateral_sigma_spatial', 3.0)):g}",
         f"Gaussian\nsigma={float(filters.get('gaussian_sigma', 0.6)):g}",

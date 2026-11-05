@@ -18,8 +18,9 @@ API contracts, output schemas, and experimental limitations.
 | --- | --- | --- |
 | Stratified slice selection | Reference masks, plane reads, physical mm spacing | `selected_cases_slices.csv` |
 | Dataset context | Seeded pool of labeled cases, one volume in memory | `dataset_context_table.csv` |
-| Classical segmentation | 2D axial slices, known liver region, no ML | Dice/IoU tables and prediction figures |
+| Classical segmentation | Liver-only preprocessing and 2D segmentation within a known liver mask | Dice/IoU tables and prediction figures |
 | Lesion-level evaluation | 2D components, split/merge-aware matches, physical area and Feret diameter | `lesion_eval/` tables and recall plot |
+| Local candidate comparison | 108 variants and three controls with one-to-one matching by lesion size | FROC, HD95, ASSD, center distance, and saved masks |
 | Agreement and method statistics | Bland–Altman, Pearson/Spearman, paired Wilcoxon and Holm | Agreement plots and comparison CSVs |
 | Stacked 3D prediction estimate | 2D segmenter applied to every axial slice, 6-connected cleanup | 3D volume, Dice/IoU and Feret comparison per case |
 | GLCM texture | Contrast, homogeneity, energy, correlation, entropy and ASM | Feature tables, plots and level sensitivity |
@@ -39,6 +40,11 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 python -m pip check
 ```
+
+To open the desktop GUI on Linux, activate the environment and run
+`python3 scripts/gui.py`. If `liver_tumor.sh` is present locally, run
+`./liver_tumor.sh` instead. This optional launcher activates `.venv` and is
+ignored by Git. The GUI requires Tk and a graphical session.
 
 ### Windows (CMD)
 
@@ -74,8 +80,10 @@ This is the same Python workflow used by the Windows launcher. It:
 2. Falls back to the repository's `data/Selected_database/` if no pairs are found.
    If neither location has pairs, it stops with an error.
 3. Regenerates `<output_dir>/selected_cases_slices.csv` using 2D mask reads.
-4. Runs baseline segmentation with the configured preprocessing and
-   `segmentation` settings.
+4. Uses the dataset liver mask to delimit the region on each selected slice.
+5. Preprocesses that region and applies the configured classical segmenter,
+   or passes the original HU and liver mask to the enabled HU detector.
+6. Saves predictions and compares them with the tumor reference.
 
 Run IDs use local time in `YYYYMMDD-HHMMSS` format, such as `20261031-180409`.
 Results go to `<output_dir>/segmentation/<run-id>/`. Existing runs are never
@@ -92,7 +100,7 @@ python scripts/run_tpi.py --config path/to/config.yaml
 Calling the Python workflow directly assumes dependencies are already installed;
 the automatic dependency checks are performed by `PSIB.bat`.
 
-### Windows graphical launcher
+### Desktop GUI
 
 From File Explorer, double-click `PSIB.bat`. From PowerShell at the
 repository root, run:
@@ -116,18 +124,25 @@ segmentation controls update a current-slice preview; **Ejecutar flujo 2D** runs
 the reproducible batch workflow with the current settings. The pinned footer
 keeps the checklist, progress, cancel, and main run action visible. Results
 figures and CSV tables appear in the **Resultados** list and use the same viewer.
-The viewer supports previous/next, fit, 100%, zoom, pan, and overlay / before /
-after display. Pixel coordinates and HU values appear in the bottom status bar.
+The viewer opens in **Entrada**, which shows the image passed to the selected
+segmenter. **Antes** shows the original liver intensities, and **Overlay** adds
+the reference and predicted masks to **Entrada**. **Contorno hepático** toggles
+the liver boundary. The status bar shows pixel coordinates, original HU and,
+for classical segmentation, the normalized input value.
 
-The default image-processing preset is HU windowing (center 30, width 150),
-CLAHE equalization, Gaussian low-pass denoising (sigma 0.6), then Sobel
-high-pass filtering. In **Preprocesamiento**, denoising can be set to none,
-bilateral, Gaussian, or mean; equalization to none, histogram equalization, or
-CLAHE; and the edge filter to none, Sobel, Prewitt, or Laplacian. The same
-equalization → low-pass → high-pass order is used for the preview and batch
-segmentation. Each saved slice figure is a square 2×3 composite showing the
-HU-windowed original, processed image, and reference/prediction, plus the
-selected edge result. Sobel figures also show the local watershed refinement.
+For classical segmentation, the order is liver mask → intensity scaling →
+denoising → equalization → contrast → segmentation. The default uses a HU
+window centered at 30 with width 150, Gaussian σ 0.6, CLAHE, and contrast 1.
+Turning off **Aplicar ventana HU** scales the minimum and maximum within the
+liver to `[0, 1]`. The preprocessed image is shown on that fixed scale. Sobel,
+Prewitt, and Laplacian are optional batch comparisons. Their edge, watershed,
+or sharpening outputs are separate from the main mask.
+
+In **Segmentación → Presets del experimento**, choose `hu_sensitive`,
+`default`, or `otsu_059` and click **Aplicar preset**. This fills the editable
+preprocessing and segmentation fields. `hu_sensitive` activates the watershed
+detector on original HU. Both Otsu presets use the preprocessed image. Use
+**Aplicar al corte** or **Segmentar corte actual** to recompute the slice.
 
 In **Caso**, set **Casos a evaluar** and **Cortes por caso (3–5)**, then use
 **Aplicar y generar selección 2D**. These values also apply when the main 2D
@@ -197,6 +212,8 @@ ranking; that mode retains index-based `minimum_slice_gap`.
 | `selection.minimum_slice_gap_mm` | 10 | Minimum physical separation for stratified slices |
 | `selection.min_tumor_pixels` | 20 | Minimum area for median/small/p75 tumor roles |
 | `selection.seed` | 2026 | Reproducible case sample |
+| `preprocessing.hu_window.enabled` | `true` | Apply the fixed HU window or scale the liver's intensity range |
+| `preprocessing.enhancement.contrast` | `1.0` | Neutral at 1, lower contrast below 1, higher contrast above 1 |
 | `dataset_context.density_tolerance_hu` | 5 | Absolute HU difference treated as isodense |
 | `features.glcm_levels` | 16 | GLCM quantization levels; 32 was sparse on small ROIs |
 | `lesion_eval.min_iou` | 0 | Minimum component IoU accepted as a lesion correspondence |
@@ -316,12 +333,12 @@ python scripts/compare_filters.py
 ```
 
 Optional `--config path/to/config.yaml` uses the same configuration rules.
-The script reads only the first selected slice, applies the configured
-equalization before the low-pass filters, and saves the equalized input with no
-low-pass filtering plus bilateral, Gaussian, and mean views to
+The script reads only the first selected slice, scales intensities within the
+liver mask, and saves the input without denoising alongside bilateral, Gaussian,
+and mean filtered views in
 `<output_dir>/figures/filter_comparison_case_<id>_slice_<index>.png`, with
-zero-padded identifiers. It applies the configured HU window, equalization,
-and filter parameters, regardless of which denoising method is active for segmentation.
+zero-padded identifiers. This comparison uses the configured window and filter
+parameters and shows the outputs before equalization and contrast adjustment.
 All panels use a common `[0, 1]` display scale; no GUI opens. Missing or empty
 selection CSVs produce an error. Compare noise reduction and boundary visibility;
 this figure does not measure segmentation accuracy.
@@ -382,9 +399,9 @@ truth; interpretation is limited by the small number of selected cases.
 
 The command accepts `--config path/to/config.yaml` and uses the configured
 data directory directly, without launcher fallback. Feature extraction and
-other non-equalized workflows use `prepare_denoised_slice` for HU windowing and
-denoising. The main segmentation runner applies equalization before low-pass
-filtering and edge processing.
+other non-equalized workflows use `prepare_denoised_slice` with the liver mask
+for intensity scaling and denoising. The main classical runner adds equalization
+and contrast via `prepare_enhanced_slice` before segmentation.
 
 For lesion-level detection and size-aware recall, analyze a completed run:
 
@@ -442,15 +459,14 @@ Run in order. Exploration writes `candidate_pool.csv`, `dataset_inventory.csv`,
 requires at least one multi-lesion case, and writes the same selection CSV
 used by the 2D workflow. It fails if the candidate pool cannot meet its criteria.
 Slice roles use mm spacing and record shortage warnings in the CSV criteria.
-Preprocessing saves HU-window, denoised, and liver-crop figures for selected
+Preprocessing saves scaled-input, denoised, and liver-crop figures for selected
 slices. These scripts use the repository configuration and do not accept
 `--config`. Regenerating selection replaces the shared selection CSV.
 
-Crop boxes use `(x0, y0, x1, y1)` with exclusive upper bounds; add the origin
-to crop-local coordinates when mapping back to the full slice. Crops use the
-reference liver mask. Baseline segmentation uses full-slice windowed and
-denoised images without cropping, using the order HU window → equalization →
-low-pass denoising → selected high-pass filter.
+Crop boxes use `(x0, y0, x1, y1)` with exclusive upper bounds. Add the origin
+to crop-local coordinates when mapping back to the full slice. Classical
+segmentation uses an array aligned to the full slice with the values outside
+the liver set to zero.
 
 ## Code layout and interfaces
 
@@ -474,6 +490,7 @@ low-pass denoising → selected high-pass filter.
 | `scripts/run_tpi.py` | Automatic selection and timestamped baseline run |
 | `scripts/select_slices_2d.py` | Seeded case selection and slice ranking using 2D reads |
 | `scripts/run_segmentation.py` | Baseline experiments and parameter sweeps |
+| `scripts/run_local_search.py` | Fixed 108-variant local candidate comparison with checkpointing and report regeneration |
 | `scripts/evaluate_lesions.py` | Per-lesion detection metrics for a completed run |
 | `scripts/evaluate_morphology_3d.py` | Full-volume estimate by stacking the 2D segmenter |
 | `scripts/analyze_agreement.py` | Bland–Altman and correlation summaries |
@@ -502,11 +519,11 @@ show `image.T` with `origin="lower"`.
 
 - `load_case(case_id, data_dir=None)` returns `(ct_hu, seg, spacing)`.
 - `iter_case_slices(...)` yields `(k, ct_2d, seg_2d, spacing)` using plane reads.
-- `preprocess_slice(...)` applies windowing → equalization → denoising and returns
-  `windowed`, `enhanced` (equalized intermediate), `denoised` (final filtered
-  image), `cropped`, and `crop_box`.
-- `prepare_denoised_slice(slice_hu, cfg)` returns the normalized full-slice
-  image for workflows that do not use equalization.
+- `preprocess_slice(...)` returns `windowed` (scaled), `denoised`, `enhanced`
+  (equalization and contrast), `cropped` (from `enhanced`), and `crop_box`.
+- `prepare_denoised_slice(slice_hu, cfg, liver_mask=...)` returns the normalized
+  and denoised full-size array. `prepare_enhanced_slice` adds equalization and
+  contrast for classical segmentation. Outside the liver, the arrays are zero.
 - `segment_slice(image, liver_mask, settings)` returns a full-slice boolean mask.
 - `plot_overlay(...)` and `save_overlay(...)` draw prediction contours in cyan
   and reference contours in orange-red. The experiment runner instead saves a
@@ -530,8 +547,8 @@ launcher test exercises the Python workflow; it does not execute Windows CMD.
 
 ## Experimental HU detector (automatic, no trained model)
 
-Opt in with `detection.enabled: true` in a complete config, or the **Detector HU
-experimental** checkbox in the GUI. The existing defaults remain historical.
+Opt in with `detection.enabled: true` in a complete config or apply the
+`hu_sensitive` preset in the GUI.
 `run_tpi.py` and `run_segmentation.py` dispatch to the same detector used in the
 preview and volumetric evaluation. `detection.method` selects `hysteresis` or
 `watershed`; that selected mask is saved, displayed and measured.
@@ -659,14 +676,61 @@ conteos externos utilizan exactamente las mismas máscaras. `--resume` reutiliza
 las máscaras completas y los conteos de uniones guardados; rechaza cambios en
 la configuración o en la selección congelada.
 
-## Nueva comparación local automática (preparada; ejecución pendiente)
+## Comparación local automática y resultados recientes
 
 Se incorporó una rama experimental sin ML con candidatos automáticos en HU,
 crecimiento adaptativo, contornos activos locales y graph cuts. Compara contexto
 vecino y candidatos hipodensos/hiperdensos en una grilla congelada de 108 variantes.
 La máscara hepática es una entrada conocida; las etiquetas tumorales solo evalúan.
 
-La instalación Linux, pruebas pendientes, preflight, ejecución, reanudación,
-análisis y uso de presets en GUI están documentados en
-[`experiments/local_candidates/README.md`](experiments/local_candidates/README.md).
-No se ejecutó el barrido ni se cambiaron defaults durante esta implementación.
+`local-v2-liver` completó las 108 variantes y los tres controles en **50 cortes
+de 10 pacientes**, con Python 3.12.3 y cuatro trabajadores. Aplicó el
+preprocesamiento enmascarado a los controles clásicos. La selección por Dice
+retuvo `default` en los cinco folds. En la misma selección se probó Otsu con
+suavizado bilateral (`sigma_color=0.5`, `sigma_spatial=10`) y contraste `0.9`.
+
+| Configuración | Dice medio por paciente | Lesiones omitidas | Omitidas <10 mm | FP/corte |
+| --- | ---: | ---: | ---: | ---: |
+| `hu_sensitive` | 0,2275 | 10/83 | 8/32 | 156,54 |
+| `default` | 0,3565 | 20/83 | 16/32 | 20,88 |
+| `otsu_059` | 0,4417 | 21/83 | 19/32 | 10,82 |
+| Otsu con bilateral | 0,3462 | 41/83 | 28/32 | 2,28 |
+
+El emparejamiento usa IoU ≥ 0,10 en esta tabla. Frente a `otsu_059`, la variante
+bilateral perdió 20 detecciones, todas menores de 30 mm. `hu_sensitive` dejó
+2 de 29 cortes positivos sin una detección válida. Son resultados internos de
+la cohorte explorada.
+
+El informe del barrido está en `results/local_candidates/local-v2-liver/analysis/`.
+El JSON de la corrida bilateral se llama `metrics_by_slice_and_size.json` y está
+en `results/otsu-bilateral-50/segmentation/otsu-bilateral-50/`. Ambos quedan bajo
+`results/`, que Git ignora. Ver el [protocolo del barrido](experiments/local_candidates/README.md)
+y la [documentación de métricas](documentation.md#17-comparación-local-y-resultados-por-tamaño).
+
+## Combinación adaptativa por tamaño
+
+Se implementó `hybrid_size`: conserva una máscara clásica y agrega componentes
+HU según su Feret **predicho** en mm, con incorporación completa o sin contacto
+con la base. No utiliza la referencia tumoral para decidir. El experimento
+completó 6 variantes iniciales, 144 ajustadas y 5 controles en los 50 cortes
+congelados, seleccionando por paciente máxima sensibilidad con Dice medio ≥0,40.
+
+**Ningún híbrido alcanzó ese piso en toda la cohorte.** El de mayor sensibilidad
+recuperó 76/83 componentes (26/32 menores de 10 mm), con Dice 0,240 y 149,60
+FP/corte; el híbrido de mayor Dice llegó a 0,327. El selector externo eligió
+solo controles Otsu y obtuvo Dice 0,421, 61/83 detecciones y 15,10 FP/corte.
+No cumplió el objetivo conjunto; los defaults permanecen sin cambios.
+
+```bash
+.venv/bin/python scripts/run_hybrid_search.py --preflight
+.venv/bin/python scripts/run_hybrid_search.py --run-id hybrid-nueva
+.venv/bin/python scripts/run_hybrid_search.py --run-id hybrid-nueva --resume
+.venv/bin/python scripts/run_hybrid_search.py --run-id hybrid-v1 --report-only
+```
+
+El preflight verifica las corridas fuente `local-v2-liver` y `otsu-bilateral-50`.
+Se reproducen los controles antes de reutilizarlos y se auditan las 7.750
+máscaras guardadas. Salidas bajo `results/hybrid_candidates/<run-id>/`.
+El preset fijo se admite en el ejecutor 2D; no se agregaron controles de GUI.
+Ver [protocolo y comandos](experiments/hybrid_candidates/README.md) e
+[informe de resultados](reports/experimento_hibrido_2026-11-05.md).

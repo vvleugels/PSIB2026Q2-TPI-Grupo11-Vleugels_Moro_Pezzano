@@ -110,6 +110,28 @@ En `results/local_candidates/<run-id>/`:
   `outer_per_lesion.csv`, `exploratory.csv`, `ablations.csv`, `report.md`, figuras,
   `promotion.json` y `preset.yaml`.
 
+`analysis/metrics.csv` y `outer_per_slice.csv` incluyen `hd95_mm`. Para cada
+corte se calcula el máximo de los percentiles 95 de las distancias dirigidas
+entre centros de píxeles de borde, con el espaciado físico en ambos ejes. Se
+comparan las máscaras 2D completas. Si alguna está vacía, el valor queda en
+blanco. Los resúmenes promedian primero por paciente y después entre pacientes
+con valores válidos, e indican cuántos cortes y pacientes contribuyen. El
+cálculo usa las máscaras guardadas y también se aplica con `--report-only`.
+
+`analysis/size_summary.csv` separa la sensibilidad y las distancias por diámetro
+máximo de Feret de la lesión de referencia en el corte. Los intervalos son
+`<10`, `[10, 30)`, `[30, 50]` y `>50` mm. `lesion_geometry.csv` contiene los
+emparejamientos uno a uno a IoU ≥0,10 y ≥0,25. Solo las parejas válidas aportan
+distancia euclídea entre centroides, ASSD y HD95 por lesión. ASSD promedia las
+distancias al borde más cercano de todos los píxeles de borde en ambas
+direcciones. Los resúmenes de estas distancias ponderan por lesión emparejada.
+
+Las figuras FROC muestran la sensibilidad de cada tamaño frente a los falsos
+positivos por corte de toda la selección. Los verdaderos positivos de otros
+tamaños no se cuentan como falsos positivos. Las líneas escalonadas indican la
+mejor sensibilidad observada en la grilla de cada método hasta cada nivel de
+falsos positivos. Los controles fijos aparecen como puntos individuales.
+
 Selección interna: maximizar Dice medio por paciente sin bajar recall total ni
 recall <10 mm frente al default. Desempatar por menor área falsa, menos FP/corte
  e identificador. El default también compite: si no hay mejora admisible,

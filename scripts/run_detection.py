@@ -124,7 +124,7 @@ def run_experiment(config_path, run_id, sweep=False, *, benchmark=False, histori
                     predictions.append(('historical', configured_prediction(hu, liver, spacing, {**history, 'detection': {'enabled':False}})['mask']))
                     otsu_cfg = deepcopy(history)
                     otsu_cfg['preprocessing']['denoising'] = dict(method='gaussian', gaussian_sigma=1.0)
-                    predictions.append(('otsu', segment_slice(prepare_denoised_slice(hu, otsu_cfg), liver,
+                    predictions.append(('otsu', segment_slice(prepare_denoised_slice(hu, otsu_cfg, liver_mask=liver), liver,
                         dict(method='otsu', opening=True, radius=1, min_area=25))))
                 for cid, pred in predictions:
                     directory = out / 'predictions' / cid

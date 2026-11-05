@@ -48,12 +48,12 @@ def audit(run_dir: Path, output: Path) -> None:
     for case_id, group in selection.groupby('case_id'):
         for k, hu, labels, spacing in iter_case_slices(int(case_id), list(group.slice_index), cfg['data_dir']):
             liver, ref = labels > 0, labels == 2
-            prepared = prepare_denoised_slice(hu, cfg)
+            prepared = prepare_denoised_slice(hu, cfg, liver_mask=liver)
             smoother = deepcopy(cfg)
             smoother['preprocessing']['denoising'] = dict(method='gaussian', gaussian_sigma=1.0)
-            images = {'original': enhance(prepared, cfg['preprocessing'].get('enhancement', {})),
+            images = {'original': enhance(prepared, cfg['preprocessing'].get('enhancement', {}), liver_mask=liver),
                       'without_equalization': prepared,
-                      'gaussian_1_without_equalization': prepare_denoised_slice(hu, smoother)}
+                      'gaussian_1_without_equalization': prepare_denoised_slice(hu, smoother, liver_mask=liver)}
             for region, mask in (('tumor', ref), ('healthy_liver', labels == 1)):
                 values = hu[mask]
                 intensities.append(dict(case_id=case_id, slice_index=k, region=region,

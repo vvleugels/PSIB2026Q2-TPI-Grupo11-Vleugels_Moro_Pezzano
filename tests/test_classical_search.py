@@ -8,7 +8,7 @@ from psib.lesion_eval import prepare_reference,match_lesions_one_to_one
 from psib.detection_validation import make_folds
 from psib.detection import configured_prediction
 from scripts.run_segmentation import iter_predictions
-from psib.preprocessing import prepare_denoised_slice,enhance
+from psib.preprocessing import prepare_enhanced_slice
 
 
 class ClassicalSearchTests(unittest.TestCase):
@@ -20,7 +20,7 @@ class ClassicalSearchTests(unittest.TestCase):
         liver=np.zeros_like(hu,dtype=bool);liver[2:-2,2:-2]=True
         for start in (0,48,210):
             chunk=records[start:start+6];c=chunk[0]['config']
-            image=enhance(prepare_denoised_slice(hu,c),c['preprocessing']['enhancement'])
+            image=prepare_enhanced_slice(hu,c,liver_mask=liver)
             variants=[dict(configuration_id=r['configuration_id'],**r['config']['segmentation']) for r in chunk]
             for (record,pred),r in zip(iter_predictions(image,liver,variants),chunk):
                 expected=configured_prediction(hu,liver,(.7,.9),r['config'])['mask']

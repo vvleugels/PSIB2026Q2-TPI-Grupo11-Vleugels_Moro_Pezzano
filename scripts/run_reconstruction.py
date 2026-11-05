@@ -209,7 +209,7 @@ def run_experiment(config_path: Path, run_id: str | None = None) -> Path:
                              for row in group.itertuples(index=False)}
             for k, hu, labels, _spacing in iter_case_slices(int(case_id), indices, cfg["data_dir"]):
                 liver, reference = labels > 0, labels == 2
-                original_prepared = prepare_denoised_slice(hu, cfg)
+                original_prepared = prepare_denoised_slice(hu, cfg, liver_mask=liver)
                 _case_scope_guard(original_prepared, liver, seg_settings)
                 original_settings = {key: value for key, value in seg_settings.items() if key != "stats_scope"}
                 baseline_prediction = (configured_prediction(hu, liver, _spacing, cfg)["mask"] if cfg.get("detection", {}).get("enabled")
@@ -230,7 +230,7 @@ def run_experiment(config_path: Path, run_id: str | None = None) -> Path:
                     for method, reconstructed_roi in all_recons[angle].items():
                         reconstructed_hu = hu.astype(np.float64, copy=True)
                         reconstructed_hu[x0:x1, y0:y1] = reconstructed_roi
-                        reconstructed_prepared = prepare_denoised_slice(reconstructed_hu, cfg)
+                        reconstructed_prepared = prepare_denoised_slice(reconstructed_hu, cfg, liver_mask=liver)
                         prediction = (configured_prediction(reconstructed_hu, liver, _spacing, cfg)["mask"] if cfg.get("detection", {}).get("enabled")
                                       else segment_slice(reconstructed_prepared, liver, original_settings))
                         score, similarity = _roi_similarity(hu, reconstructed_hu, box, (center, width))

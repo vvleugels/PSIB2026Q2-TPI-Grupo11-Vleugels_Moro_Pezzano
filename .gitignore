@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 config.local.yaml
 .psib_gui/
+/liver_tumor.sh
 PSIB.lnk
 results/
 data/*

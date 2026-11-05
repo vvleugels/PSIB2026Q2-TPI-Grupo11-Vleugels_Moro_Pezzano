@@ -7,7 +7,7 @@ from skimage.filters import laplace, prewitt, sobel
 from skimage.segmentation import watershed
 
 
-def edge_map(smoothed: np.ndarray, operator: str) -> np.ndarray:
+def edge_map(smoothed: np.ndarray, operator: str, *, liver_mask=None) -> np.ndarray:
     """Apply exactly one selected high-pass operator to a smoothed image."""
     image = np.asarray(smoothed, dtype=np.float32)
     if image.ndim != 2:
@@ -16,7 +16,15 @@ def edge_map(smoothed: np.ndarray, operator: str) -> np.ndarray:
     filters = {"sobel": sobel, "prewitt": prewitt, "laplace": laplace}
     if operator not in filters:
         raise ValueError("edge operator must be 'sobel', 'prewitt', or 'laplace'")
-    return np.asarray(filters[operator](image), dtype=np.float32)
+    mask = None if liver_mask is None else np.asarray(liver_mask, dtype=bool)
+    if mask is None or mask.all():
+        return np.asarray(filters[operator](image), dtype=np.float32)
+    if not mask.any():
+        return np.zeros_like(image)
+    # Extend the nearest liver value so padding does not create artificial edges.
+    nearest = ndimage.distance_transform_edt(~mask, return_distances=False, return_indices=True)
+    response = filters[operator](image[tuple(nearest)])
+    return np.where(mask, response, 0).astype(np.float32)
 
 
 def sharpen_with_laplacian(smoothed: np.ndarray, alpha: float = 0.5,
@@ -93,7 +101,8 @@ def measure_edge_metrics(smoothed: np.ndarray, liver: np.ndarray,
     ref_mask, pred_mask = np.asarray(reference, dtype=bool), np.asarray(prediction, dtype=bool)
     if image.ndim != 2 or image.shape != liver_mask.shape or image.shape != ref_mask.shape or image.shape != pred_mask.shape:
         raise ValueError("image and masks must be 2D arrays with matching shapes")
-    response = edge_map(image, operator) if response is None else np.asarray(response, dtype=np.float32)
+    response = (edge_map(image, operator, liver_mask=liver_mask) if response is None
+                else np.asarray(response, dtype=np.float32))
     healthy = ndimage.binary_erosion(liver_mask, iterations=2)
     tumor_exclusion = ndimage.binary_dilation(ref_mask, iterations=2)
     healthy &= ~tumor_exclusion

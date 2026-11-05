@@ -80,6 +80,10 @@ class RunSegmentationTests(unittest.TestCase):
         self.assertEqual({r['threshold_hu'] for r in global_records}, {30, 40, 50})
         with self.assertRaisesRegex(ValueError, 'fuera de la ventana'):
             build_configurations({'preprocessing': {'hu_window': {'center': 0, 'width': 10}}}, True)
+        unwindowed = {'preprocessing': {'hu_window': {'enabled': False, 'width': 0}}}
+        self.assertIsNone(build_configurations(unwindowed)[0]['threshold_hu'])
+        with self.assertRaisesRegex(ValueError, 'requiere una ventana HU activa'):
+            build_configurations(unwindowed, True)
 
     def test_sweep_keeps_all_metrics_and_exports_winners(self):
         self.save_selection(self.selected.iloc[[0, 2]])

@@ -8,6 +8,7 @@ from unittest.mock import Mock,patch
 import numpy as np
 import pandas as pd
 from psib.local_experiment import select,seal,verify_seal,fingerprint,process_patient,lesion_diagnostics,choose_fold
+from psib.local_experiment import boundary_tree, hd95_mm, size_category, slice_geometry
 from psib.lesion_eval import prepare_reference
 
 
@@ -58,6 +59,56 @@ class LocalExperimentTests(unittest.TestCase):
         result=dict(candidates=support,mask=np.zeros_like(ref))
         rows=lesion_diagnostics(np.full(ref.shape,100.),np.ones_like(ref),ref,(1,1),prepare_reference(ref,(1,1)),result)
         self.assertEqual([r['stage'] for r in rows],['lost_during_refinement','no_candidate'])
+
+    def test_hd95_reads_packed_masks_and_uses_in_plane_spacing(self):
+        reference = np.zeros((5, 7), dtype=bool)
+        reference[1, 1] = True
+        shifted = np.zeros_like(reference)
+        shifted[2, 3] = True
+        empty = np.zeros_like(reference)
+        spacing = np.array([3., 2., 7.])
+        ids = ['empty', 'shifted', 'exact']
+        metrics = pd.DataFrame({'configuration_id': ['exact', 'shifted', 'empty', 'shifted'],
+                                'min_iou': [.1, .1, .1, .25]})
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            np.savez(folder/'inputs.npz', reference=reference, spacing=spacing)
+            np.savez(folder/'masks.npz', ids=ids, predictions=[np.packbits(mask) for mask in (empty, shifted, reference)])
+            hd95, _ = slice_geometry(folder, metrics)
+            np.testing.assert_allclose(hd95, [0., 5., np.nan, 5.])
+            np.savez(folder/'inputs.npz', reference=empty, spacing=spacing)
+            hd95, geometry = slice_geometry(folder, metrics)
+            self.assertTrue(np.isnan(hd95))
+            self.assertEqual(geometry, [])
+
+    def test_size_boundaries_and_matched_geometry(self):
+        sizes = [size_category(diameter) for diameter in (9.99, 10, 29.99, 30, 50, 50.01)]
+        self.assertEqual(sizes, ['very_small', 'small', 'small', 'medium', 'medium', 'big'])
+        reference = np.zeros((5, 7), dtype=bool)
+        reference[1, 1:3] = True
+        prediction = np.zeros_like(reference)
+        prediction[1, 2] = True
+        metrics = pd.DataFrame({'configuration_id': ['local', 'local'], 'min_iou': [.25, .75]})
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            np.savez(folder/'inputs.npz', reference=reference, spacing=[3., 2., 7.])
+            np.savez(folder/'masks.npz', ids=['local'], predictions=[np.packbits(prediction)])
+            _, (matched, missed) = slice_geometry(folder, metrics)
+        self.assertEqual(matched['predicted_id'], 1)
+        self.assertEqual(matched['center_distance_mm'], 1.)
+        self.assertAlmostEqual(matched['assd_mm'], 2./3.)
+        self.assertAlmostEqual(matched['hd95_mm'], 1.9)
+        self.assertIsNone(missed['predicted_id'])
+        self.assertNotIn('assd_mm', missed)
+
+    def test_hd95_uses_worse_directed_percentile(self):
+        reference = np.zeros((5, 5), dtype=bool)
+        reference[0, 0] = True
+        prediction = reference.copy()
+        prediction[0, 4] = True
+        spacing = (1., 1.)
+        self.assertAlmostEqual(hd95_mm(prediction, boundary_tree(reference, spacing), spacing), 3.8)
+        self.assertAlmostEqual(hd95_mm(reference, boundary_tree(prediction, spacing), spacing), 3.8)
 
     def test_fold_selection_never_reads_test_scores(self):
         frame=pd.DataFrame([dict(case_id=case,configuration_id=cid,quality=quality)

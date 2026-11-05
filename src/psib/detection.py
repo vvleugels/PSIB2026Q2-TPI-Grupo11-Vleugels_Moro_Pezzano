@@ -126,13 +126,17 @@ def configured_prediction(hu, liver, spacing, cfg, legacy_settings=None, *, cont
     """Shared GUI/2D/3D dispatch, with historical 2D behavior preserved."""
     detector = cfg.get('detection', {})
     if detector.get('enabled', False):
+        if detector.get('method') == 'hybrid_size':
+            from .hybrid_segmentation import detect_hybrid
+            return detect_hybrid(hu, liver, spacing,
+                                 {k: v for k, v in detector.items() if k != 'enabled'})
         if str(detector.get('method', '')).startswith('local_'):
             from .local_segmentation import detect_local
             return detect_local(hu, liver, spacing,
                                 {k: v for k, v in detector.items() if k != 'enabled'},
                                 context=context)
         return detect_slice(hu, liver, spacing, {k: v for k, v in detector.items() if k != 'enabled'})
-    from .preprocessing import prepare_denoised_slice, enhance
+    from .preprocessing import prepare_enhanced_slice
     from .segmentation import segment_slice
-    image = enhance(prepare_denoised_slice(hu, cfg), cfg.get('preprocessing', {}).get('enhancement', {}))
+    image = prepare_enhanced_slice(hu, cfg, liver_mask=liver)
     return dict(mask=segment_slice(image, liver, legacy_settings or cfg.get('segmentation', {})))

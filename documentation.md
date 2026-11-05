@@ -13,7 +13,7 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 | --- | --- |
 | Descubrimiento y carga de pares CT/máscara NIfTI | Implementado |
 | Inventario y selección reproducible de casos y cortes | Implementado |
-| Preprocesamiento y exportación de figuras | Implementado |
+| Preprocesamiento dentro de la máscara hepática y exportación de figuras | Implementado |
 | Segmentación 2D y posprocesamiento | Implementado como API Python |
 | Dice e IoU | Implementados como API Python |
 | Características geométricas y textura GLCM 2D | Implementadas como API Python |
@@ -24,6 +24,7 @@ lógica reutilizable y `scripts/` los puntos de entrada ejecutables.
 | Volumen, burden, componentes y diámetros 3D desde máscaras de referencia | Implementados en la exploración volumétrica opcional |
 | Análisis morfológico 3D de los casos seleccionados, exportación de medidas por lesión y superficies | Implementado como flujo opcional invocable desde el GUI |
 | Evaluación por lesión, errores geométricos y detección por tamaño en cortes 2D | Implementada como flujo posterior a la segmentación |
+| Comparación de candidatos locales y controles en 50 cortes | Ejecutada con FROC, HD95, ASSD y distancia entre centroides |
 | Estimación automática 3D por apilado de predicciones axiales | Implementada como análisis opcional de volúmenes completos |
 | Concordancia Bland–Altman y comparación estadística por caso | Implementadas como análisis posteriores |
 | Ejecutor de segmentación de todos los cortes y exportación de máscaras/métricas | Implementado |
@@ -98,7 +99,8 @@ cortes seleccionados.
 | `scripts/run_compression.py` | Comparación de compresión y segmentación por corte |
 | `scripts/run_reconstruction.py` | Simulación tomográfica y comparación de métodos |
 | `scripts/check_requirements.py` | Verificación de dependencias directas del lanzador |
-| `scripts/compare_filters.py` | Comparación de bilateral, gaussiano y media después de la ecualización |
+| `scripts/compare_filters.py` | Comparación de bilateral, gaussiano y media en la ROI hepática antes de ecualizar |
+| `scripts/run_local_search.py` | Barrido local de 108 variantes y tres controles, con máscaras y análisis por tamaño |
 | `scripts/explore_dataset.py` | Inventario volumétrico y figuras de contexto |
 | `scripts/analyze_morphology_3d.py` | CSV y superficies 3D de los casos seleccionados |
 | `src/psib/gui_model.py` | Estado de sidebar y persistencia del perfil, sin dependencias Tk |
@@ -138,6 +140,10 @@ Comprobar el intérprete con
 `python --version`. El entorno virtual puede coexistir con otra versión de
 Python instalada en el sistema.
 
+Para abrir la GUI con el entorno activado, ejecutar `python3 scripts/gui.py`.
+En una sesión gráfica con Tk, también se puede usar `./liver_tumor.sh` si está
+presente en la raíz. Este lanzador local activa `.venv` y está ignorado por Git.
+
 ### Windows (CMD)
 
 ```cmd
@@ -160,7 +166,7 @@ termina con un error. No modifica los archivos YAML del usuario.
 Instalar Python 3.12 de 64 bits con el lanzador `py` para crear el entorno.
 La ejecución nativa del archivo BAT no se ha verificado desde el entorno Linux.
 
-Para usar la interfaz gráfica, ejecutar `PSIB.bat`. La ventana ofrece
+La interfaz gráfica ofrece
 cinco secciones desplazables en una sidebar izquierda que se puede contraer con
 el chevron o `Ctrl+B`; el visor ocupa el área derecha. La sección **Caso** permite
 elegir un caso (se carga solo al seleccionarlo) y recorrer cortes, **Preprocesamiento** y **Segmentación**
@@ -168,22 +174,18 @@ actualizan el corte visible, **Cuantificación** ejecuta el análisis 3D de
 referencia y **Resultados** lista figuras/CSV junto con sus explicaciones y el
 registro. El pie fijo mantiene visibles los pasos, el progreso, Cancelar y la
 acción principal. En la rail contraída, cada icono abre directamente su sección.
-La barra de estado inferior presenta coordenadas y HU. El perfil se conserva en
+La barra de estado inferior presenta coordenadas, HU y el valor de entrada
+normalizado cuando se usa un método clásico. El perfil se conserva en
 `.psib_gui/`, ignorado por Git. El pipeline y la morfología corren en segundo
 plano; los controles visibles se guardan en un YAML local ignorado por Git para
 que el pipeline use la misma configuración.
 
-El preset inicial es ventana HU (centro 30, ancho 150), CLAHE, filtro gaussiano
-de baja frecuencia (`sigma=0.6`) y Sobel de alta frecuencia. El orden aplicado
-en la vista previa y en la segmentación por lote es: ventana HU → ecualización
-→ filtro de baja frecuencia → filtro de alta frecuencia. Se puede elegir
-`none`, bilateral, gaussiano o media para denoising; `none`, ecualización de
-histograma o CLAHE para ecualización; y `none`, Sobel, Prewitt o Laplaciano
-para el filtro de bordes. Cada PNG de segmentación usa una grilla 2×3 con el
-original (con ventana HU), la imagen procesada, la referencia y la predicción;
-cuando corresponde, agrega la respuesta del filtro. Sobel añade las etiquetas
-watershed y la máscara refinada; con el filtro de bordes en `none` no se ejecuta
-watershed ni realce.
+La ruta clásica delimita el hígado con `seg > 0`. Sobre esa región aplica
+ventana HU o normalización por rango, suavizado, ecualización y contraste, en
+ese orden. La configuración inicial usa centro HU 30 y ancho 150, gaussiano
+con σ 0,6, CLAHE y contraste 1. El filtro de bordes configurado se usa en el
+ejecutor por lote para figuras y comparaciones adicionales. Sobel genera un
+refinamiento watershed que se exporta por separado de la máscara clásica.
 
 La selección 2D y la segmentación base comparten la configuración resuelta.
 El identificador usa la hora local con formato `YYYYMMDD-HHMMSS`; las salidas
@@ -191,10 +193,9 @@ van a `<output_dir>/segmentation/<identificador>/`. Si ya existe, esperar un
 segundo y volver a ejecutar. Un fallo de instalación o de `pip check` detiene
 el flujo antes de procesar datos.
 
-Las dependencias base son NumPy, SciPy, scikit-image, NiBabel, Matplotlib,
-OpenCV, pandas y PyYAML. OpenCV está declarado como dependencia, aunque los
-módulos actuales no lo importan. Todos los flujos se ejecutan con Python
-y las dependencias de `requirements.txt`.
+Las dependencias base incluyen NumPy, SciPy, scikit-image, NiBabel, Matplotlib,
+Pillow, OpenCV, pandas y PyYAML. OpenCV se usa en el experimento de compresión.
+La GUI requiere Tk en el intérprete. La lista está en `requirements.txt`.
 
 Los requisitos expresan versiones mínimas, no versiones exactas. Para reproducir
 experimentos, conservar además las versiones efectivamente instaladas.
@@ -294,6 +295,7 @@ Valores del YAML base:
 | `reconstruction.sart_relaxation` | 0.15 | Relajación de SART |
 | `preprocessing.hu_window.center` | 30 | Centro HU |
 | `preprocessing.hu_window.width` | 150 | Ancho HU |
+| `preprocessing.hu_window.enabled` | `true` | Si se desactiva, escala el rango de intensidades del hígado a `[0, 1]` |
 | `preprocessing.denoising.method` | `gaussian` | Filtro activo |
 | `preprocessing.denoising.gaussian_sigma` | 0.6 | Sigma gaussiano en píxeles |
 | `preprocessing.denoising.bilateral_sigma_color` | 0.08 | Sigma de intensidad normalizada al elegir bilateral |
@@ -302,6 +304,7 @@ Valores del YAML base:
 | `preprocessing.enhancement.method` | `clahe` | Ecualización activa |
 | `preprocessing.enhancement.clahe_clip_limit` | 0.01 | Límite de CLAHE |
 | `preprocessing.enhancement.clahe_kernel_size` | 8 | Tamaño de región CLAHE |
+| `preprocessing.enhancement.contrast` | 1.0 | Ganancia alrededor de 0,5 después de la ecualización |
 | `preprocessing.crop_margin` | 8 | Margen del recorte en píxeles |
 | `edge_analysis.operator` | `sobel` | Filtro de alta frecuencia activo; admite `none`, `sobel`, `prewitt`, `laplace` |
 | `edge_analysis.sharpen_alpha` | 0.5 | Ganancia para el realce Laplaciano |
@@ -342,6 +345,12 @@ con un ID de hora local como `20261031-180409`. Comprueba que la carpeta de
 esa ejecución no exista antes de regenerar la selección. No ejecuta barridos,
 comparación de filtros ni inventario 3D. Cada lanzamiento vuelve a seleccionar;
 para reutilizar una selección, usar el ejecutor manual de la sección 14.
+
+Para cada corte se usa la máscara hepática del dataset. La ruta clásica
+preprocesa esa región y segmenta sobre la imagen resultante. Si
+`detection.enabled` está activo, se entregan los HU originales, la máscara
+hepática y el espaciado al detector. Las etiquetas tumorales intervienen en
+la selección por roles y en la evaluación de las predicciones.
 
 Ambas etapas reciben una configuración temporal con rutas absolutas y el mismo
 `data_dir` resuelto. No se modifica el YAML del usuario. Para reproducir una
@@ -541,34 +550,34 @@ mensaje claro, en vez de usar silenciosamente estadísticas por corte.
 ## 7. API de preprocesamiento
 
 `preprocess_slice(slice_hu, liver_mask, cfg)` acepta la configuración completa
-o directamente el bloque de preprocesamiento y aplica ventana HU, ecualización,
-filtro de baja frecuencia y recorte, en ese orden. Devuelve:
+o el bloque de preprocesamiento. Primero escala las intensidades dentro de la
+máscara hepática. Luego aplica suavizado, ecualización y contraste. Devuelve
+las imágenes intermedias en coordenadas de corte completo y el recorte final.
 
 | Clave | Contenido |
 | --- | --- |
-| `windowed` | Imagen recortada a la ventana HU y normalizada en `[0,1]` |
-| `enhanced` | Imagen completa después de la ecualización |
-| `denoised` | Imagen completa ecualizada y filtrada en baja frecuencia |
-| `cropped` | Recorte de `denoised` alrededor del hígado |
+| `windowed` | Intensidades hepáticas en `[0, 1]` antes de filtrar |
+| `denoised` | Imagen suavizada dentro de la máscara hepática |
+| `enhanced` | Imagen tras ecualización y ajuste de contraste |
+| `cropped` | Recorte de `enhanced` alrededor del hígado |
 | `crop_box` | Límites `(x0, y0, x1, y1)`, con extremos superiores exclusivos |
 
-La ventana actual cubre `[-45, 105] HU`. Se admiten filtros `none`, `bilateral`,
-`gaussian` y `mean`; la ecualización admite `none`, `histogram_equalization`
-y `clahe`. El recorte agrega el margen configurado sin salir de la imagen.
-Una máscara hepática vacía provoca `ValueError` porque no se puede definir
-su caja de recorte.
+La ventana predeterminada cubre `[-45, 105] HU`. Con `hu_window.enabled: false`,
+el mínimo y el máximo hepáticos se asignan a 0 y 1. Un rango constante se
+normaliza a cero. El gaussiano y la media se normalizan por el soporte de la
+máscara. El bilateral y la mediana usan vecinos dentro de la máscara. La
+ecualización global usa el histograma hepático. CLAHE construye histogramas
+locales con píxeles hepáticos e interpola entre regiones con soporte. El
+contraste aplica `clip(0.5 + contraste * (imagen - 0.5), 0, 1)`. El exterior
+queda en cero. El margen de recorte solo cambia la vista o figura exportada.
 
-Las funciones de ventana, filtros, realce y recorte también pueden usarse
-por separado. Para reconstruir coordenadas desde un recorte, sumar su origen
-`(x0, y0)`. Para la segmentación base se usa `denoised`, que ya contiene la
-ecualización y el filtrado de baja frecuencia, conserva la forma original y
-evita necesitar esa reconstrucción.
-
-`prepare_denoised_slice(slice_hu, cfg)` aplica solo ventana HU y denoising a un
-corte completo y devuelve la imagen normalizada. `extract_features.py` y otros
-flujos que no usan ecualización pueden usar esta función. La segmentación
-principal aplica por separado ventana HU → ecualización → denoising antes del
-filtro de bordes seleccionado.
+`prepare_denoised_slice(slice_hu, cfg, liver_mask=liver)` devuelve la etapa
+suavizada que usa, por ejemplo, la extracción de textura. El segmentador clásico
+recibe `prepare_enhanced_slice(slice_hu, cfg, liver_mask=liver)`, que también
+aplica ecualización y contraste. Estas funciones conservan la forma del corte y
+devuelven ceros con una máscara vacía. `preprocess_slice` requiere una ROI con
+píxeles para definir su caja de recorte. Para reconstruir coordenadas desde esa
+caja se suma el origen `(x0, y0)`.
 
 ## 8. API de segmentación
 
@@ -610,10 +619,11 @@ parámetro no interviene en el método elegido.
 Todas las comparaciones son estrictas: la igualdad con el umbral queda fuera.
 Los valores iniciales no han sido ajustados mediante experimentos.
 
-El módulo no recibe HU. Convertir un umbral HU con
-`(HU - límite_inferior) / ancho` antes de llamar; con la ventana actual,
-`40 HU` corresponde a `0.45`. La conversión solo produce un umbral válido
-para esta API si queda en `[0,1]`; el módulo no lo recorta automáticamente.
+El umbral global recibe un valor normalizado. Con la ventana predeterminada
+`[-45, 105] HU`, la conversión `(HU - límite_inferior) / ancho` asigna `40 HU`
+a `0.5667` en la etapa de ventana. La ecualización y el contraste pueden
+cambiar esa correspondencia antes de la umbralización. Sin ventana fija, la
+escala depende del rango hepático de cada corte.
 
 ### Posprocesamiento y casos especiales
 
@@ -670,7 +680,7 @@ sys.path.insert(0, str(Path.cwd() / "src"))
 
 from psib.config import load_config
 from psib.data_io import iter_case_slices
-from psib.preprocessing import preprocess_slice
+from psib.preprocessing import prepare_enhanced_slice
 from psib.segmentation import segment_slice
 from psib.metrics import dice_score, iou_score
 
@@ -682,10 +692,10 @@ _, slice_hu, labels, spacing = next(iter_case_slices(
     int(row.case_id), [k], cfg["data_dir"]))
 liver = labels > 0
 reference = labels == 2
-processed = preprocess_slice(slice_hu, liver, cfg)
+processed = prepare_enhanced_slice(slice_hu, cfg, liver_mask=liver)
 
 settings = {"method": "statistical", "k": 1.0, "direction": "lower"}
-prediction = segment_slice(processed["denoised"], liver, settings)
+prediction = segment_slice(processed, liver, settings)
 print({
     "case_id": int(row.case_id),
     "slice_index": k,
@@ -694,9 +704,8 @@ print({
 })
 ```
 
-Si el corte no contiene hígado, no puede usarse `preprocess_slice` porque
-intenta recortarlo. El ejecutor utiliza directamente ventana y filtrado, sin recorte, y puede
-procesar esos cortes con predicción vacía.
+El ejemplo usa la imagen de entrada en tamaño completo. En cortes sin hígado,
+la preparación devuelve ceros y el segmentador devuelve una máscara vacía.
 
 ## 11. Comparación de filtros y tests
 
@@ -713,15 +722,14 @@ python scripts/compare_filters.py --config /ruta/a/config.yaml
 ```
 
 El script toma el primer par caso/corte del CSV y lee únicamente ese corte 2D.
-Respeta la precedencia de `config.local.yaml`, la ventana HU y la ecualización
-configurada, y luego compara los filtros bilateral, gaussiano y de media.
+Respeta la precedencia de `config.local.yaml`, escala las intensidades dentro
+del hígado y compara los filtros bilateral, gaussiano y de media.
 Guarda cuatro paneles con la misma escala `[0, 1]` y orientación en
 `figures/filter_comparison_case_<id>_slice_<index>.png`, bajo el directorio de
-salida configurado (identificadores con ceros a la izquierda). No abre una
-ventana gráfica. El primer panel es la imagen ecualizada sin filtro de baja
-frecuencia; los otros tres aplican cada filtro después de la ecualización,
-aunque `denoising.method` elija uno distinto para la segmentación. Si falta el
-CSV o está vacío, informa un error.
+salida configurado (identificadores con ceros a la izquierda). El primer
+panel es la entrada normalizada. Los otros tres muestran el suavizado previo
+a la ecualización y al ajuste de contraste, independientemente de
+`denoising.method`. Si falta el CSV o está vacío, informa un error.
 
 Registrar la ventana y los parámetros elegidos; comparar reducción de ruido y
 visibilidad de los bordes hepáticos y tumorales. La comparación visual no es
@@ -743,7 +751,7 @@ python -m pip check
 | --- | --- |
 | `test_data_io.py` | Pares NIfTI sintéticos, orientación, espaciado y caso faltante |
 | `test_dataset.py` | Muestreo, contexto HU, tamaños físicos y selección estratificada |
-| `test_preprocessing.py` | Ventana, coordenadas de recorte, forma y dtype de filtros |
+| `test_preprocessing.py` | Ventana, contraste, recorte e invariancia frente a cambios fuera del hígado |
 | `test_compare_filters.py` | Parámetros de filtros, orientación, lectura de un corte y errores de selección |
 | `test_metrics.py` | Casos idénticos, disjuntos, vacíos, solapamiento y validación |
 | `test_segmentation.py` | Umbrales, región hepática, morfología, conectividad y contrato |
@@ -814,10 +822,9 @@ Otsu y estadística), con variantes morfológicas. La evaluación posterior en
 una base mayor deberá excluir los casos usados en el ajuste y conservar la
 configuración elegida para esa evaluación.
 
-El ejecutor y el barrido permiten la comparación exploratoria sobre los casos
-locales. Queda completar y analizar el barrido; la validación independiente en
-otra base se considera trabajo posterior y queda fuera de los resultados
-actuales.
+La comparación local y la evaluación del bilateral sobre los 50 cortes
+congelados se resumen en la sección 17. La validación independiente con
+pacientes de otra base queda pendiente.
 
 ## 14. Ejecutor de segmentación y barrido
 
@@ -846,15 +853,15 @@ bloque por una grilla fija, conservando el preprocesamiento:
 - Relleno de huecos desactivado/activado y área mínima 0, 25 o 100 píxeles.
 
 El producto genera 252 configuraciones con identificadores estables `cfg_000`
-a `cfg_251`. Los umbrales HU se convierten usando la ventana efectiva; si alguno
-queda fuera de ella, la corrida falla. No se ajusta el preprocesamiento en la grilla.
+a `cfg_251`. El barrido requiere una ventana HU activa y que los tres umbrales
+quepan en ella. Una ejecución individual admite la normalización por rango
+hepático y en ese caso el umbral global se informa en escala `[0, 1]`.
 
-Cada caso se abre una vez en la primera pasada y solo se leen los planos elegidos;
-cada corte sigue ventana HU → ecualización → filtro de baja frecuencia → filtro
-de alta frecuencia. No se construye un array volumétrico completo ni se recorta
-la imagen usada por el segmentador. Los cortes sin hígado se procesan con
-máscara vacía. En barrido se realiza una segunda pasada por casos para exportar
-las tres variantes ganadoras.
+Cada caso se abre una vez en la primera pasada y se leen los planos elegidos.
+El segmentador clásico recibe un array del tamaño del corte, preprocesado
+dentro de la máscara hepática según la sección 7. Los cortes sin hígado se
+procesan con máscara vacía. En barrido se realiza una segunda pasada por casos
+para exportar las tres variantes ganadoras.
 
 Sobel genera el mapa de bordes y se usa para refinar la predicción inicial con
 watershed local: la máscara se expande cuatro píxeles dentro del hígado, sus
@@ -876,9 +883,9 @@ referencia y predicción.
 | Archivo | Contenido |
 | --- | --- |
 | `selected_cases_slices.csv` | Copia exacta de la selección de entrada |
-| `effective_config.yaml` | Configuración efectiva con valores de segmentación completos, sin claves internas |
+| `effective_config.yaml` | Configuración efectiva con los valores de segmentación y el alcance `preprocessing_scope: liver` |
 | `configurations.csv` | Identificador, parámetros y umbral HU cuando aplica |
-| `metrics_per_slice.csv` | Configuración, caso, corte, áreas, intersección, unión, Dice e IoU |
+| `metrics_per_slice.csv` | Configuración, caso, corte, áreas, intersección, unión, Dice, IoU y cobertura de referencia |
 | `metrics_per_case.csv` | Conteos acumulados sobre cortes seleccionados y métricas por caso |
 | `summary.csv` | Cantidad de casos, media y desvío poblacional entre casos |
 | `edge_metrics_per_slice.csv` | Métricas por corte; incluye respuesta de borde cuando no se elige `none` |
@@ -887,7 +894,7 @@ referencia y predicción.
 | `best_configurations.csv` | Mejor configuración de cada método; solo en barrido |
 | `run.json` | Estado, argumentos, tiempos UTC, versiones, revisión Git y cambios locales |
 | `predictions/<configuration_id>/*.npy` | Máscaras booleanas completas, sin transposición |
-| `predictions/<configuration_id>/*.png` | Grilla cuadrada 2×3 por corte: original con ventana HU, imagen ecualizada y filtrada, respuesta del filtro, referencia y predicción; Sobel incluye watershed |
+| `predictions/<configuration_id>/*.png` | Grilla 2×3 con entrada normalizada, imagen procesada, referencia y predicción. Agrega bordes, watershed o realce según el operador |
 
 Los CSV de métricas identifican la configuración mediante `configuration_id`;
 los parámetros completos se consultan en `configurations.csv`. `pred_area` y
@@ -929,16 +936,15 @@ Genera el mismo CSV de entrada que necesita el ejecutor, con columnas mínimas
 más semilla y criterio, sin volumen tumoral, terciles ni componentes 3D.
 Esta variante de selección se registra explícitamente en el CSV y en las notas.
 
-Por la restricción de recursos se verifican las pruebas del lector y del flujo
-2D, sin volver a ejecutar el inventario volumétrico sobre datos reales:
+Las pruebas del lector y del flujo 2D se pueden ejecutar con estos comandos.
 
 ```bash
 python -m unittest tests.test_slice_io tests.test_run_tpi tests.test_compare_filters
 python -m unittest tests.test_run_segmentation tests.test_segmentation tests.test_metrics tests.test_preprocessing
 ```
 
-Los NIfTI de prueba son fixtures sintéticos pequeños; no se realiza segmentación
-ni análisis de componentes 3D de los volúmenes reales.
+Estos tests usan NIfTI sintéticos pequeños. Las corridas con datos reales se
+describen en la sección 17.
 
 
 ## 15. Visualización de contornos
@@ -1204,9 +1210,10 @@ Ventana
 │   ├── Una sección visible; cada sección tiene su propio canvas vertical
 │   └── Pie fijo: pasos, progreso, Cancelar y Ejecutar flujo 2D (acción principal)
 ├── Visor derecho (VIEW)
-│   ├── Anterior/siguiente, zoom −/+, Ajustar, 100% y modo Overlay/Antes/Después
+│   ├── Anterior/siguiente, zoom −/+, Ajustar, 100% y modo Entrada/Antes/Overlay
+│   ├── Contorno hepático en amarillo
 │   └── Canvas de imagen con desplazamiento por arrastre
-└── Estado inferior a lo ancho: coordenadas de píxel, HU y estado del proceso
+└── Estado inferior: coordenadas, HU, valor de entrada clásico y estado del proceso
 ```
 
 La sección **Caso** ofrece campos para definir cuántos casos y cuántos cortes
@@ -1217,13 +1224,17 @@ está previsualizando no queda seleccionado automáticamente. La sección ofrece
 además el selector de casos incluidos en
 `selected_cases_slices.csv` (o todos los casos pareados antes de generar esa
 selección), un selector de volumen LiTS, metadatos del caso, navegación axial y
-saltos a cortes seleccionados. **Preprocesamiento** edita ventana HU, filtro,
-parámetro, ecualización y recorte visual. **Segmentación** permite ajustar
-umbralización, morfología, área mínima y overlays; al segmentar el corte actual
-muestra Dice, IoU, área y componentes 2D en una tabla compacta. **Cuantificación**
+saltos a cortes seleccionados. **Preprocesamiento** permite activar la ventana
+HU, ajustar el filtro, la ecualización y el contraste, y recortar la vista.
+**Segmentación** ofrece el desplegable **Presets del experimento** y una tabla
+con lesiones omitidas, omitidas de menos de 10 mm y FP por corte. **Aplicar
+preset** carga los valores de `hu_sensitive`, `default` u `otsu_059` en los
+campos editables. `hu_sensitive` selecciona el detector watershed en HU. Los
+otros dos presets usan Otsu. **Segmentar corte actual** actualiza Dice, IoU,
+cobertura de referencia, área y componentes 2D. **Cuantificación**
 ejecuta el análisis 3D existente sobre máscaras de referencia y permite iniciar
 los experimentos de compresión y reconstrucción simulada. En **Caso**, el botón
-**Generar selección de cortes 2D** crea `selected_cases_slices.csv` con la
+**Aplicar y generar selección 2D** crea `selected_cases_slices.csv` con la
 configuración actual; esa selección es requisito para los dos experimentos. Si
 falta, la GUI lo informa y permite generarla desde esa sección o ejecutar el
 flujo 2D. Cada experimento guarda sus salidas en una carpeta con identificador
@@ -1232,6 +1243,15 @@ vivo y la cancelación se gestionan desde la interfaz; las figuras y tablas
 exportadas se cargan en el visor compartido. **Resultados**
 muestra las imágenes y CSV disponibles, su explicación (si existe una entrada
 en `figure_notes.yaml`) y el registro del flujo.
+
+El visor abre en **Entrada**. Para los métodos clásicos muestra la misma matriz
+normalizada que recibe el segmentador. Para los detectores HU muestra los HU
+originales del corte, escalados a gris para la pantalla. **Antes** muestra el
+corte original en el rango del hígado. Si la ventana HU, el suavizado y la
+ecualización están desactivados y el contraste vale 1, ambas vistas coinciden.
+**Overlay** superpone las máscaras sobre la entrada. **Contorno hepático**
+activa el borde en cualquiera de las vistas. Alternar vistas sobre un corte
+cargado redibuja la imagen sin volver a calcular su predicción.
 
 La tabla 3D muestra volumen, componentes y Feret axial de la mayor lesión.
 El análisis exporta además medidas 3D, extensiones por eje, carga tumoral y la
@@ -1251,11 +1271,11 @@ colapsada. `ProfileStore` guarda `collapsed`, `active_section` y `width` en
 | Encabezado | nombre, chevron | Alternar sidebar; `Ctrl+B` hace lo mismo |
 | Navegación | cinco botones / iconos del rail | Cambiar sección conservando su estado |
 | Caso | selector, archivo, slider, spinbox | Cargar caso y navegar cortes |
-| Preprocesamiento | ventana HU, filtros, ecualización, alpha Laplaciano, recorte | Aplicar la secuencia al corte visible |
-| Segmentación | parámetros, toggles, Treeview | Segmentar corte y revisar métricas por lesión |
+| Preprocesamiento | ventana HU opcional, filtros, ecualización, contraste, recorte | Preparar la entrada del segmentador clásico |
+| Segmentación | desplegable de presets, parámetros editables, tabla de componentes | Cargar una configuración, ajustar valores y segmentar el corte |
 | Cuantificación | botón ejecutar/cancelar, Treeview | Procesar morfología de referencia en 3D |
 | Resultados | Treeview, nota, abrir carpeta, log | Mostrar figura o vista previa de CSV en el visor |
-| Visor | canvas, toolbar, navegación | Ver casos y resultados; zoom y paneo |
+| Visor | Entrada, Antes, Overlay, contorno hepático, zoom y paneo | Inspeccionar la entrada y las máscaras |
 
 La GUI no implementa una predicción de segmentación 3D ni métricas automáticas
 versus referencia 3D. El panel 3D presenta la morfología calculada desde las
@@ -1313,7 +1333,8 @@ alternativa watershed usa el gradiente físico de HU, marcadores positivos y
 marcadores de fondo dentro de cada región hepática conectada. Si falta una clase
 de marcadores, conserva la histéresis y registra el motivo. No se aplica apertura,
 relleno de agujeros, descarte por borde o por forma. Solo se compara área mínima
-0/3 mm². Los controles de ventana, CLAHE y denoising visual no cambian esta máscara.
+0/3 mm². El detector toma los HU originales y calcula su propio suavizado. Los
+ajustes de ventana, ecualización y contraste se aplican en la ruta clásica.
 
 El barrido de 48 configuraciones combina sigma 0,6/1 mm, alto 1/1,5/2, bajo
 0,5/0,75, área mínima 0/3 mm² e histéresis/watershed. Los defaults siguen
@@ -1353,3 +1374,166 @@ La extensión 3D del detector apila las mismas máscaras sin eliminar componente
 recuperados de la ventana cuantizada a ocho bits, cuyo control no es la TC original.
 Las corridas existentes permanecen conservadas. Ver README para comandos y nombres
 de las tablas de evaluación.
+
+## 17. Comparación local y resultados por tamaño
+
+`scripts/run_local_search.py` compara 108 combinaciones de crecimiento local,
+contorno activo y graph cut con `default`, `otsu_059` y `hu_sensitive`. Los
+parámetros, los 50 cortes de 10 pacientes y los cinco folds están congelados en
+[`experiments/local_candidates/`](experiments/local_candidates/README.md).
+Las tres ramas locales pueden usar contexto de cortes vecinos. Las máscaras y
+las métricas de referencia se evalúan por corte axial.
+
+```bash
+source .venv/bin/activate
+python3 scripts/run_local_search.py --preflight
+python3 scripts/run_local_search.py --run-id local-liver --workers 4
+python3 scripts/run_local_search.py --run-id local-liver --report-only
+```
+
+`--preflight` comprueba entradas sin segmentar. Para continuar una corrida
+interrumpida, usar su mismo ID y `--resume`. Los checkpoints se reutilizan si
+coinciden datos, código, protocolo y versiones. `--report-only` vuelve a
+calcular el análisis a partir de las máscaras ya guardadas. El entorno usado
+en `local-v2-liver` fue Python 3.12.3 y la corrida terminó con cuatro trabajadores
+y cero fallos de candidatos.
+
+### Máscaras y métricas
+
+- En cada `case_XXX/slice_YYYY/`, `masks.npz` guarda las predicciones finales,
+  semillas y soportes empaquetados. `ids` y `shape` identifican las filas y la
+  forma del corte. `inputs.npz` contiene la referencia, el hígado y el espaciado.
+  `candidate_masks.npz` y `candidates.json` permiten inspeccionar los candidatos.
+- En `analysis/`, `metrics.csv` guarda las métricas por configuración y corte,
+  `summary.csv` resume los controles y procedimientos en los folds externos,
+  y `choices.csv` registra qué configuración seleccionó cada fold.
+- `size_summary.csv` desglosa TP, FN, sensibilidad y distancias por tamaño, y
+  repite el total de FP y FP por corte del punto FROC en cada categoría.
+  `lesion_geometry.csv` identifica los pares y las lesiones omitidas. Los
+  tamaños usan el máximo diámetro de Feret 2D de la referencia. Los intervalos
+  son `very_small` (<10 mm), `small` ([10, 30) mm), `medium` ([30, 50] mm) y
+  `big` (>50 mm).
+- El emparejamiento uno a uno usa IoU ≥ 0,10 y ≥ 0,25. Maximiza primero el número
+  de pares válidos y luego su IoU total. Un FN es una lesión de referencia sin
+  pareja y un FP es una predicción sin pareja. Un corte positivo sin ninguna
+  pareja válida puede contener marcas falsas.
+- La distancia entre centroides, ASSD y HD95 por lesión se calculan en mm sobre
+  pares válidos. ASSD promedia todas las distancias al punto de borde más
+  cercano en ambas direcciones. HD95 toma el mayor de los dos percentiles 95
+  dirigidos. El HD95 de máscara completa compara todo el corte y se resume
+  primero por paciente. El informe indica cuántos cortes tienen ambas máscaras
+  no vacías y contribuyen al promedio.
+- Las figuras FROC muestran sensibilidad de cada tamaño frente a FP globales
+  por corte. Las líneas escalonadas indican la mejor sensibilidad observada de
+  cada método para cada presupuesto de FP. Cada control fijo aporta un punto
+  por criterio de IoU.
+
+### Comparación en los 50 cortes congelados
+
+La primera corrida `local-v1` usó el preprocesamiento clásico sobre todo el
+corte. `local-v2-liver` volvió a evaluar el mismo protocolo con el preprocesamiento
+clásico dentro del hígado. Las 108 variantes locales y `hu_sensitive` produjeron
+las mismas máscaras. La selección restringida por recall y la selección por
+Dice retuvieron `default` en los cinco folds de `local-v2-liver`.
+
+En la prueba adicional `otsu-bilateral-50` se mantuvieron la ventana HU 30/150,
+Otsu y la limpieza de `otsu_059`. Se reemplazó el gaussiano σ 1 por bilateral con
+`sigma_color=0.5` y `sigma_spatial=10` y se usó contraste `0.9`. La ecualización
+estaba desactivada en ambos. La comparación mide el cambio conjunto de suavizado
+y contraste.
+
+| Configuración | Dice medio por paciente | IoU medio por paciente | FN | FN <10 mm | Cortes positivos sin detección | FP por corte |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `hu_sensitive` | 0,2275 | 0,1568 | 10 | 8 | 2 | 156,54 |
+| `default` | 0,3565 | 0,2585 | 20 | 16 | 4 | 20,88 |
+| `otsu_059` | 0,4417 | 0,3369 | 21 | 19 | 5 | 10,82 |
+| Otsu con bilateral | 0,3462 | 0,2594 | 41 | 28 | 8 | 2,28 |
+
+Hay 83 lesiones de referencia, 32 de ellas menores de 10 mm, en 29 cortes
+positivos. Los conteos de detección de la tabla usan IoU ≥ 0,10. A ese umbral,
+la variante bilateral perdió 20 lesiones detectadas por `otsu_059`, todas
+menores de 30 mm. A IoU ≥ 0,25, el bilateral omitió 47 lesiones y `otsu_059`
+omitió 26. Estas mediciones corresponden a cortes de pacientes ya explorados.
+
+`results/otsu-bilateral-50/segmentation/otsu-bilateral-50/metrics_by_slice_and_size.json`
+es el informe adicional de la prueba bilateral. Contiene configuración
+efectiva, resumen global y por paciente, un punto FROC por IoU y los cuatro
+tamaños dentro de cada corte. Un FP sin referencia se clasifica por el
+diámetro de la predicción. Los Dice/IoU por tamaño comparan las máscaras de
+los componentes asignados a ese grupo. Un valor `null` indica que falta un
+denominador o una pareja válida para la distancia. Este JSON se generó para
+la comparación. El ejecutor 2D estándar produce los CSV y las máscaras
+descritos en la sección 14. Los resultados locales se guardan bajo `results/`.
+
+## 18. Segmentación híbrida adaptativa por tamaño
+
+`psib.hybrid_segmentation.detect_hybrid(hu, liver, spacing, settings)` combina
+una máscara clásica con candidatos watershed en HU. La entrada no incluye la
+referencia tumoral. `configured_prediction` despacha esta ruta cuando
+`detection.enabled: true` y `detection.method: hybrid_size`.
+
+El bloque de detección contiene:
+
+- `base_config`: únicamente `preprocessing` y `segmentation` para la rama clásica.
+- `hu_settings`: parámetros del detector HU, con `method: watershed` y
+  `min_area_mm2: 0`; no se elimina área pequeña adicional.
+- `max_diameter_mm`: límite positivo estricto sobre el Feret del componente
+  candidato predicho, medido con el spacing de ambos ejes.
+- `addition_rule`: `complete` incorpora todo componente elegible; `disjoint`
+  exige además que no solape ni toque la base, incluyendo vecinos diagonales.
+
+Devuelve `mask`, `base_mask`, `candidate_mask`, `added_mask` y `components`
+(decisión, diámetro, área física y contacto por candidato), además de semillas,
+puntuación, parámetros HU efectivos y motivos de fallback del watershed. La
+base completa se conserva y la salida queda restringida al hígado. No se
+consultan etiquetas tumorales ni IDs de paciente para elegir parámetros. La
+mediana/MAD hepática adapta el contraste por corte; el tamaño se estima en la
+predicción, no en la referencia.
+
+`run_segmentation.py` admite el preset fijo y exporta métricas, máscaras finales
+y diagnósticos de ambas ramas con ID `hybrid_preset`. El barrido histórico
+`--sweep` no acepta este método: usar `run_hybrid_search.py`. No se agregaron
+controles específicos a la GUI ni se evaluaron aquí las extensiones 3D,
+compresión o reconstrucción.
+
+El ejecutor experimental compara seis combinaciones Otsu/HU congeladas y 144
+variantes ajustadas, más cinco controles. Conserva los 50 cortes y folds del
+experimento local. Los controles Otsu también participan de la selección.
+En cada fold, solo los ocho pacientes internos determinan la configuración:
+Dice medio por paciente ≥0,40, máximo recall total, luego recall <10 mm, Dice,
+menor área falsa en mm², menos FP/corte e ID. Si no hay alternativa factible,
+conserva `otsu_059` y registra que el piso no se cumplió. Se evalúan etapa 1,
+etapa 2 y selección conjunta de ambas; no se elige entre etapas usando el
+resultado externo. Las comparaciones uno-a-uno usan IoU ≥0,10 y ≥0,25.
+
+`--preflight` verifica fuentes sin segmentar ni escribir salidas. La ejecución
+reproduce exactamente los controles guardados antes de reutilizarlos.
+`--resume` exige coincidencia de código, versiones y entradas y comprueba los
+sellos de cada corte. `--report-only` usa únicamente los artefactos de la corrida
+híbrida: recalcula todas las métricas desde máscaras, comprueba los CSV originales,
+regenera elecciones y conserva el análisis anterior. Sus huellas de análisis
+quedan registradas por separado del manifiesto de generación.
+
+Las salidas incluyen `choices.csv`, `inner_validation.csv`, `outer_per_slice.csv`,
+`outer_per_lesion.csv`, `summary.csv`, `per_case.csv`, `size_summary.csv`,
+`gains_losses.csv`, `negative_slices.csv`, `exploratory.csv`, `grid_lesions.csv`,
+`promotion.json`, `audit.json` y un preset completo elegido con toda la cohorte.
+Los tamaños son <10, [10,30), [30,50] y >50 mm, más un agregado ≥30 mm. Las
+fusiones/divisiones se cuentan por solapamiento positivo y se distinguen del
+umbral de correspondencia. El área falsa suma superficies de cortes, no volumen.
+Las figuras muestran referencias, predicciones externas y dos híbridos
+`exploratory_*` elegidos con toda la cohorte solo para diagnóstico.
+
+En `hybrid-v1`, ninguno de los 150 híbridos obtuvo Dice medio ≥0,40 sobre toda
+la cohorte. El híbrido de mayor sensibilidad detectó 76/83 componentes y 26/32
+menores de 10 mm, con Dice 0,240 y 149,60 FP/corte. El híbrido de mayor Dice
+alcanzó 0,327. Las selecciones externas de ambas etapas y del conjunto eligieron
+solo controles Otsu: Dice 0,421, 61/83 detecciones y 15,10 FP/corte. Hubo respaldo
+por falta de variante factible en dos folds. El objetivo conjunto no se alcanzó;
+no se modificaron defaults. `analysis/preset.yaml` eligió `otsu_059` usando todos
+los casos y no tiene una evaluación independiente adicional.
+
+Ver [protocolo reproducible](experiments/hybrid_candidates/README.md) e
+[informe completo](reports/experimento_hibrido_2026-11-05.md). Se trata de una
+cohorte previamente explorada, con selección por referencia y ROI hepática
+conocida; los resultados no validan generalización externa.

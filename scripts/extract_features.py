@@ -164,7 +164,7 @@ def _extract_one_level(cfg, output_dir: Path, levels: int) -> tuple[Path, pd.Dat
         indices = sorted(int(value) for value in rows.slice_index)
         tumor_reasons = []
         for slice_index, ct, seg, spacing in iter_case_slices(int(case_id), indices, cfg["data_dir"]):
-            image = prepare_denoised_slice(ct, cfg)
+            image = prepare_denoised_slice(ct, cfg, liver_mask=seg > 0)
             for region_name, label_value in REGIONS:
                 roi = seg == label_value
                 texture = extract_texture_features(image, roi, levels=levels)

@@ -14,14 +14,19 @@ from importlib.metadata import version
 import numpy as np
 import pandas as pd
 from scipy import ndimage as ndi
+from scipy.spatial import cKDTree
 from .classical_search import score_mask, summarize_search
-from .lesion_eval import prepare_reference, match_lesions_one_to_one
+from .lesion_eval import prepare_reference, match_lesions_one_to_one, label_prediction_ious, _optimal_pairs
 from .local_segmentation import (configurations, prepare_maps, prepare_context_maps,
     context_from_volume, build_candidates, refine_candidates)
 from .detection import configured_prediction
 from .data_io import load_case
 
 DEPENDENCIES = ('numpy','scipy','scikit-image','nibabel','pandas','matplotlib','PyYAML')
+SIZE_BINS = ('very_small', 'small', 'medium', 'big')
+SIZE_LABELS = ('Very small (<10 mm)', 'Small (10 to <30 mm)', 'Medium (30 to 50 mm)', 'Big (>50 mm)')
+GEOMETRY_COLUMNS = ('configuration_id', 'min_iou', 'reference_id', 'predicted_id', 'diameter_mm',
+                    'size', 'match_iou', 'center_distance_mm', 'assd_mm', 'hd95_mm')
 
 
 def atomic_json(path, value):
@@ -197,6 +202,123 @@ def summarize(frame):
     return score
 
 
+def boundary_tree(mask, spacing, origin=0):
+    boundary = mask & ~ndi.binary_erosion(mask)
+    return cKDTree((np.argwhere(boundary) + origin) * spacing)
+
+
+def boundary_distances(predicted_boundary, reference_boundary):
+    return (reference_boundary.query(predicted_boundary.data)[0],
+            predicted_boundary.query(reference_boundary.data)[0])
+
+
+def hd95_mm(prediction, reference_boundary, spacing):
+    """Maximum of the two directed 95th-percentile boundary distances in 2D."""
+    if not reference_boundary.n or not prediction.any():
+        return np.nan
+    distances = boundary_distances(boundary_tree(prediction, spacing), reference_boundary)
+    return max(np.percentile(direction, 95) for direction in distances)
+
+
+def component_geometry(labels, box, component, spacing):
+    mask = labels[box] == component
+    origin = np.array([axis.start for axis in box])
+    center = (np.asarray(ndi.center_of_mass(mask)) + origin) * spacing
+    return center, boundary_tree(mask, spacing, origin)
+
+
+def size_category(diameter):
+    if diameter < 10:
+        return 'very_small'
+    if diameter < 30:
+        return 'small'
+    if diameter <= 50:
+        return 'medium'
+    return 'big'
+
+
+def matched_geometry(prediction, prepared, reference_geometry, spacing, criteria):
+    reference_labels, reference_sizes, diameters = prepared
+    predicted_labels, ious = label_prediction_ious(prediction, reference_labels, reference_sizes)
+    boxes = ndi.find_objects(predicted_labels)
+    pair_metrics = {}
+    for criterion in criteria:
+        pairs = {ref + 1: pred + 1 for ref, pred in _optimal_pairs(ious, (ious > 0) & (ious >= criterion))}
+        for ref, diameter in diameters.items():
+            pred = pairs.get(ref)
+            row = dict(min_iou=criterion, reference_id=ref, predicted_id=pred,
+                       diameter_mm=diameter, size=size_category(diameter))
+            if pred is not None:
+                if (ref, pred) not in pair_metrics:
+                    ref_center, ref_boundary = reference_geometry[ref]
+                    pred_center, pred_boundary = component_geometry(predicted_labels, boxes[pred-1], pred, spacing)
+                    distances = boundary_distances(pred_boundary, ref_boundary)
+                    pair_metrics[ref, pred] = dict(
+                        match_iou=ious[ref-1, pred-1],
+                        center_distance_mm=np.linalg.norm(pred_center - ref_center),
+                        assd_mm=sum(direction.sum() for direction in distances) / sum(map(len, distances)),
+                        hd95_mm=max(np.percentile(direction, 95) for direction in distances))
+                row.update(pair_metrics[ref, pred])
+            yield row
+
+
+def slice_geometry(folder, metrics):
+    with np.load(folder/'inputs.npz') as inputs:
+        reference = inputs['reference']
+        spacing = inputs['spacing'][:2]
+    if not reference.any():
+        return np.nan, []
+
+    reference_boundary = boundary_tree(reference, spacing)
+    prepared = prepare_reference(reference, spacing)
+    reference_labels = prepared[0]
+    reference_geometry = {rid: component_geometry(reference_labels, box, rid, spacing)
+                          for rid, box in enumerate(ndi.find_objects(reference_labels), 1)}
+    with np.load(folder/'masks.npz') as masks:
+        ids = masks['ids']
+        predictions = masks['predictions']
+    expected_ids = set(metrics.configuration_id)
+    if len(ids) != len(predictions) or len(ids) != len(expected_ids) or set(ids) != expected_ids:
+        raise ValueError(f'Invalid prediction coverage for geometry: {folder}')
+
+    criteria = sorted(metrics.min_iou.unique())
+    distances = {}
+    geometry = []
+    for cid, packed in zip(ids, predictions):
+        prediction = np.unpackbits(packed, count=reference.size).reshape(reference.shape).astype(bool)
+        distances[cid] = hd95_mm(prediction, reference_boundary, spacing)
+        geometry.extend(dict(configuration_id=cid, **row) for row in
+                        matched_geometry(prediction, prepared, reference_geometry, spacing, criteria))
+    return metrics.configuration_id.map(distances), geometry
+
+
+def summarize_report(frame):
+    score = summarize(frame)
+    patient_hd95 = frame.groupby('case_id').hd95_mm.mean()
+    score['hd95_mean_mm'] = float(patient_hd95.mean())
+    score['hd95_n_slices'] = int(frame.hd95_mm.count())
+    score['hd95_n_cases'] = int(patient_hd95.count())
+    return score
+
+
+def size_summary(slices, lesions, group_column, scope):
+    groups = [group_column, 'min_iou']
+    operating_points = slices.groupby(groups).FP.agg(fp='sum', n_slices='size')
+    operating_points['fp_per_slice'] = operating_points.fp / operating_points.n_slices
+    geometry = lesions.groupby([*groups, 'size']).agg(
+        n_reference=('reference_id', 'size'), tp=('predicted_id', 'count'),
+        center_distance_mean_mm=('center_distance_mm', 'mean'), assd_mean_mm=('assd_mm', 'mean'),
+        lesion_hd95_mean_mm=('hd95_mm', 'mean')).reset_index()
+    sizes = pd.DataFrame({'size': SIZE_BINS})
+    summary = operating_points.reset_index().merge(sizes, how='cross')
+    summary = summary.merge(geometry, how='left', on=[*groups, 'size'], validate='one_to_one')
+    for column in ('n_reference', 'tp'):
+        summary[column] = summary[column].fillna(0).astype(int)
+    summary['fn'] = summary.n_reference - summary.tp
+    summary['sensitivity'] = summary.tp / summary.n_reference.where(summary.n_reference > 0)
+    return summary.rename(columns={group_column: 'operating_point'}).assign(scope=scope)
+
+
 def choose_fold(primary,fold):
     """Only training-patient rows may influence either selection procedure."""
     if set(fold['train']) & set(fold['test']):raise ValueError('Overlapping patient partitions')
@@ -207,12 +329,17 @@ def choose_fold(primary,fold):
 
 
 def analyze(out,selection,folds,controls,*,figures=True):
-    out=Path(out);all_metrics=[];all_lesions=[]
+    out=Path(out);all_metrics=[];all_lesions=[];all_geometry=[]
     for row in selection.itertuples():
         folder=out/f'case_{int(row.case_id):03d}'/f'slice_{int(row.slice_index):04d}'
         if not verify_seal(folder): raise ValueError(f'Incomplete slice: {folder}')
-        all_metrics.append(pd.read_csv(folder/'metrics.csv')); all_lesions.append(pd.read_csv(folder/'lesions.csv'))
+        slice_metrics = pd.read_csv(folder/'metrics.csv')
+        slice_metrics['hd95_mm'], geometry = slice_geometry(folder, slice_metrics)
+        all_geometry.extend(dict(case_id=row.case_id, slice_index=row.slice_index, **entry) for entry in geometry)
+        all_metrics.append(slice_metrics)
+        all_lesions.append(pd.read_csv(folder/'lesions.csv'))
     metrics=pd.concat(all_metrics,ignore_index=True);lesions=pd.concat(all_lesions,ignore_index=True)
+    geometry = pd.DataFrame(all_geometry, columns=('case_id', 'slice_index', *GEOMETRY_COLUMNS))
     if len(metrics)!=len(selection)*(len(configurations())+len(controls))*2: raise ValueError('Incomplete metrics grid')
     expected_ids={r['configuration_id'] for r in configurations()}|set(controls)
     for _,group in metrics.groupby(['case_id','slice_index','min_iou']):
@@ -231,9 +358,14 @@ def analyze(out,selection,folds,controls,*,figures=True):
             held_lesions=lesions[lesions.case_id.isin(fold['test']) & (lesions.configuration_id==cid)].copy()
             lesion_outer.append(held_lesions.assign(family=family,fold=fold['fold']))
     outer=pd.concat(outer,ignore_index=True);lesion_outer=pd.concat(lesion_outer,ignore_index=True)
-    summary=pd.DataFrame([dict(family=f,min_iou=t,**summarize(g)) for (f,t),g in outer.groupby(['family','min_iou'])])
-    percase=pd.DataFrame([dict(family=f,min_iou=t,case_id=c,**summarize(g)) for (f,t,c),g in outer.groupby(['family','min_iou','case_id'])])
-    exploratory=pd.DataFrame([dict(configuration_id=cid,min_iou=t,**summarize(g)) for (cid,t),g in metrics.groupby(['configuration_id','min_iou'])])
+    geometry_keys = ['configuration_id', 'case_id', 'slice_index', 'min_iou']
+    outer_geometry = outer[[*geometry_keys, 'family']].merge(geometry, on=geometry_keys, how='inner')
+    grid_sizes = size_summary(metrics, geometry, 'configuration_id', 'grid')
+    outer_sizes = size_summary(outer, outer_geometry, 'family', 'outer')
+    sizes = pd.concat([outer_sizes, grid_sizes], ignore_index=True)
+    summary=pd.DataFrame([dict(family=f,min_iou=t,**summarize_report(g)) for (f,t),g in outer.groupby(['family','min_iou'])])
+    percase=pd.DataFrame([dict(family=f,min_iou=t,case_id=c,**summarize_report(g)) for (f,t,c),g in outer.groupby(['family','min_iou','case_id'])])
+    exploratory=pd.DataFrame([dict(configuration_id=cid,min_iou=t,**summarize_report(g)) for (cid,t),g in metrics.groupby(['configuration_id','min_iou'])])
     ids=['case_id','slice_index','reference_id']
     baseline=lesion_outer[lesion_outer.family=='default'][ids+['detected']].rename(columns={'detected':'default_detected'})
     lesion_outer=lesion_outer.merge(baseline,on=ids,validate='many_to_one')
@@ -246,7 +378,8 @@ def analyze(out,selection,folds,controls,*,figures=True):
         analysis_source_sha256=digest(Path(__file__)),source_manifest_sha256=digest(out/'manifest.json') if (out/'manifest.json').exists() else None,
         dependencies={name:version(name) for name in DEPENDENCIES}))
     for name,frame in [('metrics',metrics),('choices',pd.DataFrame(choices)),('outer_per_slice',outer),('outer_per_lesion',lesion_outer),
-                       ('summary',summary),('per_case',percase),('exploratory',exploratory)]:
+                       ('summary',summary),('per_case',percase),('exploratory',exploratory),
+                       ('size_summary', sizes), ('lesion_geometry', geometry)]:
         frame.to_csv(report_dir/f'{name}.csv',index=False)
     selected=summary[(summary.family=='constrained') & (summary.min_iou==.1)].iloc[0]
     baseline=summary[(summary.family=='default') & (summary.min_iou==.1)].iloc[0]
@@ -264,19 +397,42 @@ def analyze(out,selection,folds,controls,*,figures=True):
     # Explicit ablations keep all 108 rows, not just winners after seeing held-out outcomes.
     grid=pd.DataFrame([dict(configuration_id=r['configuration_id'],**r['settings']) for r in configurations()])
     exploratory.merge(grid,on='configuration_id').to_csv(report_dir/'ablations.csv',index=False)
-    if figures: render_figures(out,report_dir,outer)
+    if figures:
+        render_figures(out,report_dir,outer)
+        render_froc(grid_sizes, grid, report_dir/'figures')
     lines=['# Local candidates: exploratory internal comparison','',
            'Selection prioritizes patient Dice, constrained by total and small-lesion recall against default. '
            'All references are 2D; neighboring slices provide image context only. '
            'Failures exclude affected variants from selection; no silent algorithm fallback.','',
-           '| Procedure | IoU match | Dice | Recall | Small recall | FP/slice | Pixel FP | Failed candidates |',
-           '|---|---:|---:|---:|---:|---:|---:|---:|']
+           'HD95 compares the 2D boundaries of the full slice masks in mm and is independent of the IoU match threshold. '
+           'Only slices with both masks non-empty contribute. The mean gives equal weight to patients with valid slices.', '',
+           '| Procedure | IoU match | Dice | HD95 mean (mm) | HD95 slices / reference-positive | Recall | Small recall | FP/slice | Pixel FP | Failed candidates |',
+           '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
     for r in summary.itertuples():
-        lines.append(f'| {r.family} | {r.min_iou} | {r.dice_mean:.4f} | {r.recall:.4f} | {r.small_recall:.4f} | {r.fp_per_slice:.2f} | {r.pixel_FP} | {r.failed_candidates} |')
+        hd95 = f'{r.hd95_mean_mm:.2f}' if r.hd95_n_slices else '—'
+        coverage = f'{r.hd95_n_slices}/{r.n_slices-r.negative_slices}'
+        lines.append(f'| {r.family} | {r.min_iou} | {r.dice_mean:.4f} | {hd95} | {coverage} | {r.recall:.4f} | {r.small_recall:.4f} | {r.fp_per_slice:.2f} | {r.pixel_FP} | {r.failed_candidates} |')
     lines.extend(['',f'Procedure meets promotion criteria: {eligible}. No defaults changed.',
                   f'All-cohort future-test preset: {cid}. This fixed preset has no new independent evaluation.',
                   'Inspect outer_per_lesion.csv for gains, losses, contrast classes, missed candidates and fusions. '
-                  'See ablations.csv for polarity/context/method comparisons; these are exploratory.'])
+                  'See ablations.csv for polarity/context/method comparisons; these are exploratory.', '',
+                  '## Lesion size and matched geometry', '',
+                  'Bins use the reference 2D maximum Feret diameter. Geometry means include matched pairs only, '
+                  'with equal weight per lesion. ASSD averages all nearest-boundary distances from both directions.', '',
+                  '| Size | Procedure | Detected at IoU ≥ 0.10 | Center distance (mm) | ASSD (mm) | Lesion HD95 (mm) |',
+                  '|---|---|---:|---:|---:|---:|'])
+    for size, label in zip(SIZE_BINS, SIZE_LABELS):
+        for row in outer_sizes[(outer_sizes['size'] == size) & (outer_sizes.min_iou == .1)].itertuples():
+            means = (row.center_distance_mean_mm, row.assd_mean_mm, row.lesion_hd95_mean_mm)
+            distances = ' | '.join(f'{mean:.2f}' if row.tp else '—' for mean in means)
+            lines.append(f'| {label} | {row.operating_point} | {row.tp}/{row.n_reference} | {distances} |')
+    lines.extend(['', '## FROC', '',
+                  'Each point shows sensitivity within one reference size bin versus global false positives per slice. '
+                  'Predictions matched to lesions in other bins are excluded from the false-positive count. '
+                  'The step lines show the best observed grid sensitivity at each false-positive budget by method.', '',
+                  '[Size summaries and FROC points](size_summary.csv) · [Per-lesion geometry](lesion_geometry.csv)'])
+    if figures:
+        lines.extend(['', '[IoU ≥ 0.10](figures/froc_iou_010.png) · [IoU ≥ 0.25](figures/froc_iou_025.png)'])
     (report_dir/'report.md').write_text('\n'.join(lines)+'\n')
     seal(report_dir)
     final=out/'analysis'
@@ -286,6 +442,44 @@ def analyze(out,selection,folds,controls,*,figures=True):
         final.replace(backup)
     report_dir.replace(final)
     return dict(eligible_procedure=eligible,failed_candidates=int(primary.failed_candidates.sum()))
+
+
+def render_froc(sizes, grid, destination):
+    import matplotlib.pyplot as plt
+
+    points = sizes.merge(grid[['configuration_id', 'method']], how='left',
+                         left_on='operating_point', right_on='configuration_id')
+    colors = {'local_growth': '#1f77b4', 'local_contour': '#d14a18', 'local_graphcut': '#258259'}
+    markers = {'default': 'D', 'otsu_059': 's', 'hu_sensitive': '^'}
+    for criterion, data in points.groupby('min_iou'):
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=True, sharey=True, layout='constrained')
+        handles = {}
+        for ax, size, label in zip(axes.flat, SIZE_BINS, SIZE_LABELS):
+            panel = data[data['size'] == size]
+            count = int(panel.n_reference.iloc[0])
+            ax.set_title(f'{label} · {count} references')
+            ax.set_xscale('symlog', linthresh=1)
+            ax.set_ylim(-.03, 1.04)
+            ax.grid(alpha=.25)
+            if not count:
+                ax.text(.5, .5, 'No reference lesions', ha='center', transform=ax.transAxes)
+                continue
+            for method, group in panel.groupby('method'):
+                color = colors[method]
+                ax.scatter(group.fp_per_slice, group.sensitivity, color=color, s=12, alpha=.4)
+                best = group.groupby('fp_per_slice').sensitivity.max().cummax()
+                line, = ax.step(best.index, best, where='post', color=color)
+                handles[method] = line
+            for row in panel[panel.method.isna()].itertuples():
+                handles[row.operating_point] = ax.scatter(row.fp_per_slice, row.sensitivity, s=45,
+                    color='#202020', marker=markers.get(row.operating_point, 'o'), zorder=4)
+        fig.suptitle(f'FROC by reference lesion size · IoU ≥ {criterion:.2f}')
+        fig.supxlabel('False positives per slice (symmetric log scale)')
+        fig.supylabel('Lesion sensitivity')
+        if handles:
+            fig.legend(handles.values(), handles.keys(), loc='outside right center', frameon=False)
+        fig.savefig(destination/f'froc_iou_{round(criterion*100):03d}.png', dpi=150)
+        plt.close(fig)
 
 
 def render_figures(out,destination,outer):

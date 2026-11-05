@@ -75,9 +75,11 @@ class DetectionTests(unittest.TestCase):
             current_settings=lambda:(cfg,{}),selected_case_id=lambda:1,
             draw_case_image=Mock(),update_slice_metrics=Mock(),refresh_steps=Mock(),append_log=Mock())
         preview.slice_var.get.return_value=0
-        preview.view_mode.get.return_value='Después'
+        preview.view_mode.get.return_value='Entrada'
+        preview.redraw_slice_overlay=lambda:TpiLauncher.redraw_slice_overlay(preview)
         TpiLauncher.show_case_slice(preview)
         np.testing.assert_array_equal(expected,preview.current_prediction)
+        self.assertIs(preview.draw_case_image.call_args.args[0],preview.current_hu)
         preview.append_log.assert_not_called()
 
     def test_compression_detector_receives_restored_hu(self):

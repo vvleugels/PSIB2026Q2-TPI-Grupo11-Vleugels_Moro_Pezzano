@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 from psib.classical_search import configurations,score_mask,summarize_search,choose,greedy_union,validate_folds
 from psib.config import load_config
 from psib.data_io import load_case
-from psib.preprocessing import prepare_denoised_slice,enhance,apply_hu_window
+from psib.preprocessing import prepare_enhanced_slice,apply_hu_window
 from psib.detection import configured_prediction
 from psib.lesion_eval import prepare_reference
 from scripts.run_segmentation import iter_predictions
@@ -28,7 +28,7 @@ from scripts.run_segmentation import iter_predictions
 
 def signature(cfg):
     p=cfg['preprocessing'];s=cfg['segmentation'];d=p['denoising'];e=p['enhancement']
-    return (p['hu_window']['center'],p['hu_window']['width'],
+    return (p['hu_window'].get('enabled', True),p['hu_window']['center'],p['hu_window']['width'],e.get('contrast', 1.0),
         d.get('gaussian_sigma',0) if d['method']=='gaussian' else 0,e['method'],
         e.get('clahe_clip_limit',.01) if e['method']=='clahe' else None,
         e.get('clahe_kernel_size',8) if e['method']=='clahe' else None,
@@ -90,6 +90,7 @@ def generate(args,out,cfg,records,selection):
     for run in sorted((ROOT/'results/segmentation').glob('*/effective_config.yaml')):
         try:
             h=yaml.safe_load(run.read_text())
+            if h.get('preprocessing_scope') != 'liver':continue
             if h.get('detection',{}).get('enabled') or h.get('segmentation',{}).get('method')!='otsu':continue
             index=signatures.get(signature(h))
             if index is not None:historical.append((run.parent,index))
@@ -112,7 +113,7 @@ def generate(args,out,cfg,records,selection):
             packed=[];rows=[]
             for start in range(0,len(records),6):
                 chunk=records[start:start+6];c=chunk[0]['config']
-                im=enhance(prepare_denoised_slice(hu,c),c['preprocessing']['enhancement'])
+                im=prepare_enhanced_slice(hu,c,liver_mask=liver)
                 variants=[dict(configuration_id=r['configuration_id'],**r['config']['segmentation']) for r in chunk]
                 for record,pred in iter_predictions(im,liver,variants):
                     index=len(packed);cid=record['configuration_id']
@@ -266,6 +267,7 @@ def main():
     args=parser.parse_args()
     if Path(args.run_id).name!=args.run_id or args.run_id in ('.','..'):raise ValueError('run-id must be a directory name')
     cfg=load_config(args.config);cfg={k:v for k,v in cfg.items() if not k.startswith('_')}
+    cfg['preprocessing_scope']='liver'
     if cfg.get('detection',{}).get('enabled'):raise ValueError('Baseline must be the current classical default')
     selection=pd.read_csv(args.benchmark/'selected_cases_slices.csv');folds=json.loads((args.benchmark/'folds.json').read_text())
     if len(selection)!=50 or selection.duplicated(['case_id','slice_index']).any() or not (selection.groupby('case_id').size()==5).all():raise ValueError('Expected 50 frozen slices')

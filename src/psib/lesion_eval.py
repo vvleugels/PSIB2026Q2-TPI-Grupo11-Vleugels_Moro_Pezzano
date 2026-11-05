@@ -172,18 +172,9 @@ def match_lesions_one_to_one(pred, ref, spacing, min_iou=0.10, *, prepared_refer
         raise ValueError('min_iou must be in [0, 1]')
     rlabels, rsizes, diameters = (prepare_reference(ref, spacing) if prepared_reference is None
                                 else prepared_reference)
-    plabels, npred = ndimage.label(pred, structure=np.ones((3, 3), dtype=bool))
-    nref = len(rsizes) - 1
-    psizes = np.bincount(plabels.ravel(), minlength=npred + 1)
-    both = (rlabels > 0) & (plabels > 0)
-    intersections = np.bincount((rlabels[both] * (npred + 1) + plabels[both]),
-        minlength=(nref + 1) * (npred + 1)).reshape(nref + 1, npred + 1)[1:, 1:]
-    union = rsizes[1:, None] + psizes[None, 1:] - intersections
-    ious = np.divide(intersections, union, out=np.zeros_like(intersections, dtype=float), where=union > 0)
-    valid = (intersections > 0) & (ious >= min_iou)
-    matches = {}
-    if nref and npred:
-        matches = {int(r + 1): int(p + 1) for r, p in _optimal_pairs(ious, valid)}
+    _, ious = label_prediction_ious(pred, rlabels, rsizes)
+    nref, npred = ious.shape
+    matches = {r + 1: p + 1 for r, p in _optimal_pairs(ious, (ious > 0) & (ious >= min_iou))}
     rows = [dict(reference_id=r, predicted_id=matches.get(r, 0),
                  status='TP' if r in matches else 'FN',
                  iou=float(ious[r-1, matches[r]-1]) if r in matches else 0.0,
@@ -194,6 +185,19 @@ def match_lesions_one_to_one(pred, ref, spacing, min_iou=0.10, *, prepared_refer
                      diameter_ref_mm=np.nan, size_class='none') for p in range(1, npred + 1)
                 if p not in matched_predictions)
     return pd.DataFrame(rows, columns=['reference_id', 'predicted_id', 'status', 'iou', 'diameter_ref_mm', 'size_class'])
+
+
+def label_prediction_ious(pred, reference_labels, reference_sizes):
+    """Return 8-connected prediction labels and component IoUs without background."""
+    labels, count = ndimage.label(pred, structure=np.ones((3, 3), dtype=bool))
+    sizes = np.bincount(labels.ravel(), minlength=count + 1)
+    both = (reference_labels > 0) & (labels > 0)
+    pairs = reference_labels[both] * (count + 1) + labels[both]
+    intersections = np.bincount(pairs, minlength=len(reference_sizes) * (count + 1)).reshape(
+        len(reference_sizes), count + 1)[1:, 1:]
+    union = reference_sizes[1:, None] + sizes[None, 1:] - intersections
+    ious = np.divide(intersections, union, out=np.zeros_like(intersections, dtype=float), where=union > 0)
+    return labels, ious
 
 
 def _optimal_pairs(ious, valid):
