@@ -13,7 +13,7 @@ from psib.config import load_config
 from psib.data_io import load_case
 from psib.detection import configured_prediction
 from psib.local_segmentation import validate_settings,context_from_volume
-from psib.local_experiment import atomic_json
+from psib.serialization import atomic_json
 from psib.metrics import dice_score,iou_score,reference_coverage
 from scripts.run_segmentation import read_selection,aggregate_metrics,export_slice_comparison,_metadata
 from psib.preprocessing import apply_hu_window

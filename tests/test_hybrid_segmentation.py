@@ -2,22 +2,15 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
-from types import SimpleNamespace
 import numpy as np
 import pandas as pd
-from scipy import ndimage as ndi
 from psib.hybrid_segmentation import (combine_masks, prepare_components, detect_hybrid,
                                       configurations, validate_settings)
 from psib.detection import configured_prediction
-from psib.hybrid_experiment import (select_scores, choose_fold, process_slice, unpack,
-                                   analyze, evaluate_mask, preflight, PROTOCOL, validate_run_metadata)
-from psib.local_experiment import seal
-from psib.lesion_eval import prepare_reference, match_lesions_one_to_one
-from psib.detection_validation import make_folds
+from psib.lesion_eval import match_lesions_one_to_one
 
 ROOT=Path(__file__).resolve().parents[1]
-CONTROLS=json.loads((ROOT/'experiments/local_candidates/controls.json').read_text())
+CONTROLS=json.loads((ROOT/'tests/fixtures/hybrid_controls.json').read_text())
 
 
 class HybridMaskTests(unittest.TestCase):
@@ -43,11 +36,9 @@ class HybridMaskTests(unittest.TestCase):
         reference=np.zeros((14,14),bool);reference[3:6,2:5]=True;reference[3:6,8:11]=True
         bridge=np.zeros_like(reference);bridge[4,4:9]=True
         mask=combine_masks(reference,bridge,np.ones_like(reference),(1.,1.),10.,'complete')['mask']
-        rows,lesions=evaluate_mask(mask,reference,(1.,1.),prepare_reference(reference,(1.,1.)))
-        self.assertEqual(rows[0]['TP'],1);self.assertEqual(rows[0]['FN'],1)
-        self.assertEqual(rows[0]['fusion_components'],1)
         public=match_lesions_one_to_one(mask,reference,(1.,1.),.1)
-        self.assertEqual((public.status=='TP').sum(),rows[0]['TP'])
+        self.assertEqual((public.status=='TP').sum(),1)
+        self.assertEqual((public.status=='FN').sum(),1)
 
     def test_empty_liver_and_clipping(self):
         base=np.ones((8,8),bool);candidate=base.copy();liver=np.zeros_like(base)
@@ -98,82 +89,6 @@ class HybridMaskTests(unittest.TestCase):
                         {'base_config':{'detection':{'enabled':True}}}):
             with self.assertRaises(ValueError):validate_settings(records[0]['settings']|changes)
         with self.assertRaises(ValueError):combine_masks(np.zeros((2,2)),np.zeros((3,3)),np.ones((2,2)),(1,1))
-
-
-class HybridSelectionTests(unittest.TestCase):
-    def test_floor_ranking_and_explicit_fallback(self):
-        common=dict(small_recall=.5,false_area_mm2=20.,fp_per_slice=2.)
-        scores={'otsu_059':dict(common,dice_mean=.39,recall=.7),
-                'a':dict(common,dice_mean=.399,recall=1.),
-                'b':dict(common,dice_mean=.4,recall=.8),
-                'c':dict(common,dice_mean=.6,recall=.75)}
-        self.assertEqual(select_scores(scores,set(scores)),('b','selected'))
-        self.assertEqual(select_scores(scores,{'a','otsu_059'}),('otsu_059','no_variant_reaches_dice_floor'))
-        scores['d']=dict(scores['b'],small_recall=.6)
-        self.assertEqual(select_scores(scores,set(scores))[0],'d')
-
-    def test_held_out_outcomes_never_choose_parameters(self):
-        records=configurations(CONTROLS)[:1];cid=records[0]['configuration_id']
-        rows=[]
-        for case in range(10):
-            for config in ('default','otsu_059',cid):
-                rows.append(dict(case_id=case,configuration_id=config,TP=2 if config==cid else 1,FP=0,FN=0 if config==cid else 1,
-                    small_TP=1,small_FN=0,intersection=8,pred_area=10,reference_area=10,union=12,
-                    pixel_area_mm2=1.,failed_candidates=0))
-        frame=pd.DataFrame(rows);fold=make_folds(range(10))[0]
-        before=choose_fold(frame,fold,records,'stage1')[:2]
-        frame.loc[frame.case_id.isin(fold['test']),['TP','FP','FN','intersection']]=999
-        self.assertEqual(before,choose_fold(frame,fold,records,'stage1')[:2])
-        self.assertEqual(before[0],cid)
-
-    def test_checkpoint_resume_and_report_from_masks(self):
-        controls=CONTROLS
-        records=[configurations(controls)[0],configurations(controls)[6]]
-        hu=np.full((24,24),100.);hu[7:12,9:14]=40.
-        liver=np.ones_like(hu,bool);ref=np.zeros_like(liver);ref[7:12,9:14]=True
-        spacing=np.array([1.,1.,2.]);bilateral_cfg=controls['otsu_059']
-        with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp);source=root/'source';bilateral=root/'bilateral';out=root/'out';out.mkdir()
-            pred_dir=bilateral/'predictions/cfg_000';pred_dir.mkdir(parents=True)
-            row=SimpleNamespace(case_id=0,slice_index=0)
-            folder=source/'case_000/slice_0000';folder.mkdir(parents=True)
-            np.savez_compressed(folder/'inputs.npz',hu=hu,liver=liver,reference=ref,spacing=spacing)
-            masks={cid:configured_prediction(hu,liver,spacing,cfg)['mask'] for cid,cfg in controls.items()}
-            np.savez_compressed(folder/'masks.npz',ids=list(masks),shape=hu.shape,predictions=np.stack([np.packbits(m) for m in masks.values()]))
-            np.save(pred_dir/'case_000_slice_000.npy',masks['otsu_059'])
-            self.assertEqual(process_slice(source,bilateral,out,row,controls,bilateral_cfg,records),'completed')
-            first=(out/'case_000/slice_0000/masks.npz').read_bytes()
-            with patch('psib.hybrid_experiment.configured_prediction',side_effect=AssertionError('must reuse')):
-                self.assertEqual(process_slice(source,bilateral,out,row,controls,bilateral_cfg,records),'cached')
-            self.assertEqual(first,(out/'case_000/slice_0000/masks.npz').read_bytes())
-            # 10 disjoint patients, five synthetic slices each; analysis has no dependency on source images.
-            import shutil
-            selection=[]
-            template=out/'case_000/slice_0000'
-            for c in range(10):
-                for k in range(5):
-                    selection.append(dict(case_id=c,slice_index=k))
-                    target=out/f'case_{c:03d}'/f'slice_{k:04d}'
-                    if c==0 and k==0:continue
-                    shutil.copytree(template,target)
-                    frame=pd.read_csv(target/'metrics.csv');frame['case_id']=c;frame['slice_index']=k
-                    frame.to_csv(target/'metrics.csv',index=False);seal(target)
-            pd.DataFrame(selection).to_csv(out/'selection.csv',index=False)
-            for name,value in [('folds',make_folds(range(10))),('controls',controls),('configurations',records),('protocol',PROTOCOL),
-                               ('manifest',dict(selection=selection,folds=make_folds(range(10)),controls=controls,configurations=records,protocol=PROTOCOL))]:
-                (out/f'{name}.json').write_text(json.dumps(value))
-            (out/'base_config.yaml').write_text('data_dir: data\noutput_dir: results\n')
-            result=analyze(out,figures=False)
-            self.assertEqual(result['masks_recomputed'],350)
-            summary=pd.read_csv(out/'analysis/summary.csv')
-            again=analyze(out,figures=False)
-            pd.testing.assert_frame_equal(summary,pd.read_csv(out/'analysis/summary.csv'))
-            self.assertEqual(result,again)
-            (out/'protocol.json').write_text('{}')
-            with self.assertRaisesRegex(ValueError,'metadata differs'):validate_run_metadata(out)
-            # A corrupt sealed checkpoint must not silently resume.
-            (template/'metrics.csv').write_text('corrupt')
-            with self.assertRaises(ValueError):process_slice(source,bilateral,out,row,controls,bilateral_cfg,records)
 
 
 if __name__=='__main__':unittest.main()

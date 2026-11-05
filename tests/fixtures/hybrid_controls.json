@@ -1,0 +1,90 @@
+{
+  "default": {
+    "preprocessing": {
+      "hu_window": {
+        "center": 30,
+        "width": 150
+      },
+      "denoising": {
+        "method": "gaussian",
+        "gaussian_sigma": 0.6
+      },
+      "enhancement": {
+        "method": "clahe",
+        "clahe_clip_limit": 0.01,
+        "clahe_kernel_size": 8
+      },
+      "crop_margin": 8
+    },
+    "segmentation": {
+      "method": "otsu",
+      "threshold": 0.45,
+      "k": 1.0,
+      "direction": "lower",
+      "opening": true,
+      "closing": true,
+      "fill_holes": true,
+      "footprint": "disk",
+      "radius": 2,
+      "min_area": 10
+    },
+    "detection": {
+      "enabled": false,
+      "method": "hysteresis",
+      "sigma_mm": 0.6,
+      "background_sigma_mm": 10.0,
+      "noise_floor_hu": 5.0,
+      "high": 1.0,
+      "low": 0.33,
+      "min_area_mm2": 1.0
+    },
+    "edge_analysis": {
+      "operator": "sobel",
+      "sharpen_alpha": 0.5
+    }
+  },
+  "otsu_059": {
+    "preprocessing": {
+      "hu_window": {
+        "center": 30,
+        "width": 150
+      },
+      "denoising": {
+        "method": "gaussian",
+        "gaussian_sigma": 1.0
+      },
+      "enhancement": {
+        "method": "none",
+        "clahe_clip_limit": 0.01,
+        "clahe_kernel_size": 8
+      }
+    },
+    "segmentation": {
+      "method": "otsu",
+      "footprint": "disk",
+      "opening": true,
+      "closing": true,
+      "fill_holes": true,
+      "radius": 2,
+      "min_area": 10
+    },
+    "detection": {
+      "enabled": false
+    },
+    "edge_analysis": {
+      "operator": "none"
+    }
+  },
+  "hu_sensitive": {
+    "detection": {
+      "enabled": true,
+      "method": "watershed",
+      "sigma_mm": 0.6,
+      "background_sigma_mm": 10.0,
+      "high": 1.5,
+      "low": 0.5,
+      "min_area_mm2": 0.0,
+      "noise_floor_hu": 5.0
+    }
+  }
+}

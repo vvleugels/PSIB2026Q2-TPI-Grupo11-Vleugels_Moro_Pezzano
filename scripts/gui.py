@@ -35,13 +35,8 @@ from psib.app_icon import load_icon_images, warn_icon_once
 from scipy import ndimage
 
 DEFAULT_CONFIG = ROOT / "config.yaml"
-EXPERIMENT_CONTROLS = ROOT / "experiments" / "local_candidates" / "controls.json"
-# Frozen local-v2-liver comparison on 50 slices at IoU >= 0.10.
-EXPERIMENT_PRESET_RESULTS = (
-    ("hu_sensitive", 10, 8, "156,54"),
-    ("default", 20, 16, "20,88"),
-    ("otsu_059", 21, 19, "10,82"),
-)
+EXPERIMENT_CONTROLS = ROOT / "config" / "presets" / "controls.json"
+EXPERIMENT_PRESETS = ("hu_sensitive", "default", "otsu_059")
 RESULT_PREFIX = "TPI run completed. Results are in "
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
@@ -406,9 +401,31 @@ class TpiLauncher:
             "min_area": tk.StringVar(value=str(defaults.get("min_area", 10))),
         }
         self.labeled_combo(parent, "Método", self.segmentation_vars["method"], ("global", "otsu", "statistical"))
-        self.labeled_entry(parent, "Umbral [0–1]", self.segmentation_vars["threshold"])
-        self.labeled_entry(parent, "k estadístico", self.segmentation_vars["k"])
-        self.labeled_combo(parent, "Dirección", self.segmentation_vars["direction"], ("lower", "upper"))
+        threshold_entry = self.labeled_entry(parent, "Umbral manual [0–1] (global)", self.segmentation_vars["threshold"])
+        k_entry = self.labeled_entry(parent, "k estadístico", self.segmentation_vars["k"])
+        direction_combo = self.labeled_combo(parent, "Dirección (statistical)", self.segmentation_vars["direction"],
+                                             ("lower", "upper"))
+        method_hint = ttk.Label(parent, style="Body.TLabel", wraplength=270)
+        method_hint.pack(fill="x", pady=(4, 0))
+
+        def update_threshold_controls(*_args):
+            method = self.segmentation_vars["method"].get()
+            detector_enabled = self.detection_enabled.get()
+            global_active = not detector_enabled and method == "global"
+            statistical_active = not detector_enabled and method == "statistical"
+            threshold_entry.configure(state="normal" if global_active else "disabled")
+            k_entry.configure(state="normal" if statistical_active else "disabled")
+            direction_combo.configure(state="readonly" if statistical_active else "disabled")
+            hints = {
+                "global": "Global usa el umbral manual. Pulsá Segmentar corte actual para ver el cambio.",
+                "otsu": "Otsu calcula el umbral de cada corte. Elegí global para probar un valor manual.",
+                "statistical": "El método estadístico calcula el umbral con k y la dirección.",
+            }
+            method_hint.configure(text="La predicción usa el detector activo." if detector_enabled else hints[method])
+
+        self.segmentation_vars["method"].trace_add("write", update_threshold_controls)
+        self.detection_enabled.trace_add("write", update_threshold_controls)
+        update_threshold_controls()
         ttk.Label(parent, text="Filtrado final: baseline y locales con config").pack(anchor="w")
         for key, title in (("opening", "Apertura morfológica"), ("closing", "Cierre morfológico"),
                            ("fill_holes", "Rellenar huecos")):
@@ -436,18 +453,11 @@ class TpiLauncher:
     def build_experiment_presets(self, parent: ttk.Frame) -> None:
         self.experiment_preset = tk.StringVar(value="hu_sensitive")
         self.experiment_preset_applied = False
-        self.labeled_combo(parent, "Presets del experimento", self.experiment_preset,
-                           tuple(row[0] for row in EXPERIMENT_PRESET_RESULTS))
-        ttk.Label(parent, text="local-v2-liver · IoU ≥ 0,10 · FN: lesiones omitidas",
+        self.labeled_combo(parent, "Alternativas experimentales", self.experiment_preset,
+                           EXPERIMENT_PRESETS)
+        ttk.Label(parent, text="Opcionales. El método principal se carga desde config.yaml; "
+                  "el preset 'default' es una alternativa histórica.",
                   style="Body.TLabel", wraplength=255).pack(anchor="w", pady=(4, 2))
-        columns = ("preset", "fn", "fn_small", "fp_per_slice")
-        table = ttk.Treeview(parent, columns=columns, show="headings", height=3, selectmode="none")
-        for key, label, width in zip(columns, ("Preset", "FN", "FN <10", "FP/corte"), (94, 32, 52, 64)):
-            table.heading(key, text=label)
-            table.column(key, width=width, minwidth=width, anchor="center")
-        for row in EXPERIMENT_PRESET_RESULTS:
-            table.insert("", "end", values=row)
-        table.pack(fill="x")
         ttk.Button(parent, text="Aplicar preset", style="Secondary.TButton",
                    command=self.apply_experiment_preset).pack(fill="x", pady=(4, 2))
         self.preset_status = tk.StringVar(value="Aplicá un preset para cargar sus campos editables.")
@@ -503,13 +513,17 @@ class TpiLauncher:
                    command=self.browse_results_path).pack(fill="x")
         ttk.Label(parent, text="Registro", style="Body.TLabel").pack(anchor="w", pady=(6, 2))
 
-    def labeled_entry(self, parent, label: str, variable: tk.Variable) -> None:
+    def labeled_entry(self, parent, label: str, variable: tk.Variable) -> ttk.Entry:
         ttk.Label(parent, text=label, style="Body.TLabel").pack(anchor="w", pady=(5, 1))
-        ttk.Entry(parent, textvariable=variable).pack(fill="x")
+        entry = ttk.Entry(parent, textvariable=variable)
+        entry.pack(fill="x")
+        return entry
 
-    def labeled_combo(self, parent, label: str, variable: tk.StringVar, values) -> None:
+    def labeled_combo(self, parent, label: str, variable: tk.StringVar, values) -> ttk.Combobox:
         ttk.Label(parent, text=label, style="Body.TLabel").pack(anchor="w", pady=(5, 1))
-        ttk.Combobox(parent, textvariable=variable, values=values, state="readonly").pack(fill="x")
+        combo = ttk.Combobox(parent, textvariable=variable, values=values, state="readonly")
+        combo.pack(fill="x")
+        return combo
 
     def bind_sidebar_shortcuts(self) -> None:
         self.root.bind("<Control-b>", lambda _event: self.toggle_sidebar())
@@ -779,15 +793,19 @@ class TpiLauncher:
             self.preprocessing_vars["sharpen_alpha"].get())
         config.setdefault("edge_analysis", {})["operator"] = self.preprocessing_vars["edge_operator"].get()
         segment = {key: var.get() for key, var in self.segmentation_vars.items()}
-        segment["threshold"] = float(segment["threshold"])
-        segment["k"] = float(segment["k"])
+        detector_enabled = self.detection_enabled.get()
+        saved_segment = config.get("segmentation", {})
+        for key, method, default in (("threshold", "global", 0.45), ("k", "statistical", 1.0)):
+            if detector_enabled or segment["method"] != method:
+                segment[key] = saved_segment.get(key, default)
+            segment[key] = float(segment[key])
         segment["radius"] = int(segment["radius"])
         segment["min_area"] = int(segment["min_area"])
         if self.experiment_preset_applied:
             config["detection"] = {}
         config["local_pipeline"] = "configured" if self.local_config_pipeline.get() else "raw_hu"
         detector = config.setdefault("detection", {})
-        detector.update(enabled=self.detection_enabled.get(), method=self.detection_method.get())
+        detector.update(enabled=detector_enabled, method=self.detection_method.get())
         if not detector["enabled"]:
             return config, segment
         if detector["method"].startswith("local_"):
@@ -832,7 +850,7 @@ class TpiLauncher:
         for variable, value in updates:
             variable.set(value)
         self.experiment_preset_applied = True
-        self.preset_status.set(f"{name} aplicado. Podés editar cualquier campo.")
+        self.preset_status.set(f"{name} aplicado. Podés editar los campos habilitados.")
         self.append_log(f"Preset {name} aplicado a Preprocesamiento y Segmentación.")
 
     def load_local_preset(self) -> None:
@@ -929,6 +947,7 @@ class TpiLauncher:
                 else:
                     self.current_prediction = configured_prediction(self.current_hu, liver, self.case_spacing, config, settings)["mask"]
             else:
+                variant_label = settings["method"]
                 self.current_processed = prepare_enhanced_slice(self.current_hu, config, liver_mask=liver)
                 self.current_prediction = segment_slice(self.current_processed, liver, settings)
         except (ValueError, KeyError) as exc:

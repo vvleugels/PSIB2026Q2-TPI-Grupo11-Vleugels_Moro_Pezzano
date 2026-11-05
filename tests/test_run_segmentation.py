@@ -141,7 +141,7 @@ class RunSegmentationTests(unittest.TestCase):
             if i >= 6:
                 self.assertIn('caso', state['context'])
         (self.output / 'selected_cases_slices.csv').unlink()
-        with self.assertRaisesRegex(RuntimeError, 'explore_dataset.py'):
+        with self.assertRaisesRegex(RuntimeError, 'select_slices_2d.py'):
             run_experiment(self.config, 'missing')
         for run_id in ('../escape', 'with space', ''):
             with self.assertRaises(ValueError):

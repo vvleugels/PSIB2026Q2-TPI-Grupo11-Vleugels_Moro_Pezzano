@@ -129,8 +129,7 @@ def iter_predictions(image, liver, records):
 
 def read_selection(path):
     if not path.is_file():
-        raise FileNotFoundError("Falta selected_cases_slices.csv. Ejecute scripts/explore_dataset.py "
-                                "y luego scripts/select_cases.py con las rutas de esta configuración.")
+        raise FileNotFoundError("Falta selected_cases_slices.csv. Ejecute scripts/select_slices_2d.py con las rutas de esta configuración.")
     frame = pd.read_csv(path)
     if frame.empty or not {"case_id", "slice_index"}.issubset(frame.columns):
         raise ValueError("La selección debe tener filas y columnas case_id y slice_index.")

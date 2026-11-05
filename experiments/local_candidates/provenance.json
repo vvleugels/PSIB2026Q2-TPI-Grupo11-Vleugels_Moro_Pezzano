@@ -1,6 +1,0 @@
-{
-  "default": "classical-search-20261104/effective_config.yaml: exact processing settings; no data/output paths",
-  "otsu_059": "classical-search-20261104 configurations.json otsu_059",
-  "hu_sensitive": "classical-20261104 det_009; maximum historical cohort recall, ties preferred fewer FP",
-  "interpretation": "Frozen historical controls, not new independent estimates"
-}

@@ -5,7 +5,7 @@ compression:
   - 50
   - 25
   - 10
-data_dir: data/Selected_database
+data_dir: data/Task03_Liver
 dataset_context:
   density_tolerance_hu: 5
 detection:
@@ -65,21 +65,10 @@ segmentation:
   min_area: 50
 selection:
   candidate_pool_size: 15
-  case_ids:
-  - 3
-  - 9
-  - 45
-  - 57
-  - 76
-  - 94
-  - 99
-  - 101
-  - 105
-  - 117
   min_tumor_pixels: 20
   minimum_slice_gap: 2
   minimum_slice_gap_mm: 10
-  n_cases: 10
+  n_cases: 131
   seed: 2026
   slice_strategy: stratified
   slices_per_case: 5
