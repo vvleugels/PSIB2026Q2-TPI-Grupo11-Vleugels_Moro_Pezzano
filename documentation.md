@@ -1564,8 +1564,10 @@ anterior para reproducir configuraciones guardadas. Esta nueva variante cambia
 el algoritmo: sus métricas deben obtenerse en una corrida nueva; no se ha
 establecido que mejore los resultados anteriores.
 
-El default de `config.yaml` reproduce los parámetros de la mejor corrida Otsu
-`20261105-154519`: detector HU/local desactivado, ventana 30/150, gaussiano
-sigma 0,6 píxeles, CLAHE 0,01 con ventana 8, contraste 1, apertura/cierre con
-disco de radio 2, relleno y área mínima 50 píxeles. Se conserva Sobel para el
-análisis de bordes de esa configuración. Reiniciar la GUI carga estos defaults.
+El default de `config.yaml` reproduce la variante Otsu sin CLAHE de la corrida
+`20261105-160110`: detector HU/local desactivado, ventana 30/150, gaussiano
+sigma 1 píxel, sin realce ni operador de bordes, contraste 1, apertura/cierre
+con disco de radio 2, relleno y área mínima 50 píxeles. Se eligió por su mayor
+sensibilidad para componentes >10 mm a IoU ≥0,25 en los ocho pacientes
+comparados (38/41 frente a 35/41 con CLAHE), a costa de más falsos positivos
+y menor Dice medio por paciente. Reiniciar la GUI carga estos defaults.
