@@ -367,6 +367,8 @@ class TpiLauncher:
         self.local_refinement = tk.StringVar(value=str(detection.get("refinement", 2.)))
         self.local_polarity = tk.StringVar(value=detection.get("polarity", "dark"))
         self.local_context = tk.BooleanVar(value=detection.get("context", True))
+        self.local_config_pipeline = tk.BooleanVar(
+            value=load_config(DEFAULT_CONFIG).get("local_pipeline", "raw_hu") == "configured")
         self.local_overlays = tk.BooleanVar(value=False)
         self.local_parameters = ({k: v for k, v in detection.items() if k != "enabled"}
                                  if str(detection.get("method", "")).startswith("local_") else {})
@@ -376,6 +378,8 @@ class TpiLauncher:
         ttk.Checkbutton(parent, text="Usar cortes vecinos (métodos locales)", variable=self.local_context).pack(anchor="w")
         ttk.Checkbutton(parent, text="Mostrar semillas y candidatos", variable=self.local_overlays,
                         command=self.redraw_slice_overlay).pack(anchor="w")
+        ttk.Checkbutton(parent, text="Locales: usar preprocesamiento y morfología del config",
+                        variable=self.local_config_pipeline).pack(anchor="w")
         ttk.Button(parent, text="Cargar preset local YAML", command=self.load_local_preset).pack(fill="x")
         self.detection_vars = {}
         for key, label, default in (("sigma_mm", "Suavizado (mm)", 0.6),
@@ -388,7 +392,7 @@ class TpiLauncher:
                            ("noise_floor_hu", "Piso de ruido (HU, vacío: YAML)")):
             self.detection_vars[key] = tk.StringVar()
             self.labeled_entry(parent, label, self.detection_vars[key])
-        ttk.Label(parent, text="Controles siguientes: baseline histórico").pack(anchor="w")
+        ttk.Label(parent, text="Umbralización: baseline histórico").pack(anchor="w")
         self.segmentation_vars = {
             "method": tk.StringVar(value=str(defaults.get("method", "global"))),
             "threshold": tk.StringVar(value=str(defaults.get("threshold", 0.45))),
@@ -405,6 +409,7 @@ class TpiLauncher:
         self.labeled_entry(parent, "Umbral [0–1]", self.segmentation_vars["threshold"])
         self.labeled_entry(parent, "k estadístico", self.segmentation_vars["k"])
         self.labeled_combo(parent, "Dirección", self.segmentation_vars["direction"], ("lower", "upper"))
+        ttk.Label(parent, text="Filtrado final: baseline y locales con config").pack(anchor="w")
         for key, title in (("opening", "Apertura morfológica"), ("closing", "Cierre morfológico"),
                            ("fill_holes", "Rellenar huecos")):
             ttk.Checkbutton(parent, text=title, variable=self.segmentation_vars[key]).pack(anchor="w")
@@ -780,6 +785,7 @@ class TpiLauncher:
         segment["min_area"] = int(segment["min_area"])
         if self.experiment_preset_applied:
             config["detection"] = {}
+        config["local_pipeline"] = "configured" if self.local_config_pipeline.get() else "raw_hu"
         detector = config.setdefault("detection", {})
         detector.update(enabled=self.detection_enabled.get(), method=self.detection_method.get())
         if not detector["enabled"]:
@@ -835,9 +841,11 @@ class TpiLauncher:
             return
         try:
             from psib.local_segmentation import validate_settings
-            values = yaml.safe_load(Path(path).read_text())["detection"]
+            preset = yaml.safe_load(Path(path).read_text())
+            values = preset["detection"]
             settings = validate_settings({k: v for k, v in values.items() if k != "enabled"})
             self.local_parameters = settings
+            self.local_config_pipeline.set(preset.get("local_pipeline", "raw_hu") == "configured")
             self.detection_enabled.set(True)
             self.detection_method.set(settings["method"])
             self.local_high.set(str(settings["high"]))
@@ -878,6 +886,7 @@ class TpiLauncher:
         try:
             result = future.result()
             self.current_local_result = result
+            self.current_processed = result.get("processed_image")
             self.current_prediction = result["mask"]
             self.redraw_slice_overlay()
             self.update_slice_metrics()
@@ -912,7 +921,8 @@ class TpiLauncher:
             detector = config.get("detection", {})
             if detector.get("enabled"):
                 method = detector.get("method", "hysteresis")
-                variant_label = "HU originales / " + method
+                configured_local = method.startswith("local_") and config.get("local_pipeline") == "configured"
+                variant_label = ("Preprocesamiento configurado / " if configured_local else "HU originales / ") + method
                 if method.startswith("local_"):
                     self.current_prediction = None
                     self.start_local_preview(config, settings, k, self.local_preview_token)

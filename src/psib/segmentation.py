@@ -104,6 +104,16 @@ def segment_slice(image: np.ndarray, liver_mask: np.ndarray,
     else:
         result[liver] = values < threshold
 
+    return postprocess_mask(result, liver, cfg)
+
+
+def postprocess_mask(mask, liver_mask, settings):
+    """Apply shared morphology and pixel-area filtering to a predicted mask."""
+    cfg = _validate_settings(settings)
+    liver = np.asarray(liver_mask, dtype=bool)
+    result = np.asarray(mask, dtype=bool) & liver
+    if result.ndim != 2 or np.asarray(mask).shape != liver.shape:
+        raise ValueError("Expected aligned 2D prediction and liver masks")
     if cfg["opening"] or cfg["closing"]:
         radius = int(cfg["radius"])
         footprint = (disk(radius).astype(bool) if cfg["footprint"] == "disk"

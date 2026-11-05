@@ -79,10 +79,10 @@ def robust(values, floor):
     return median, max(floor, float(1.4826*np.median(np.abs(values-median))))
 
 
-def prepare_maps(hu, liver, spacing, settings):
+def prepare_maps(hu, liver, spacing, settings, *, preprocessed=False):
     cfg = validate_settings(settings)
     hu, liver, spacing = _inputs(hu, liver, spacing)
-    smooth = masked_gaussian(hu, liver, cfg['sigma_mm'], spacing)
+    smooth = hu.copy() if preprocessed else masked_gaussian(hu, liver, cfg['sigma_mm'], spacing)
     scale = robust(smooth[liver], cfg['noise_floor_hu'])[1] if liver.any() else cfg['noise_floor_hu']
     contrasts = np.stack([(masked_gaussian(smooth, liver, r, spacing)-smooth)/scale
                           for r in cfg['background_mm']])
@@ -106,7 +106,7 @@ def context_from_volume(volume, liver, index, spacing):
             for j in context_indices(index, volume.shape[2], spacing[2])]
 
 
-def prepare_context_maps(context, shape, spacing, settings):
+def prepare_context_maps(context, shape, spacing, settings, *, preprocessed=False):
     result = []
     seen = set()
     for offset, hu, liver in context:
@@ -115,7 +115,7 @@ def prepare_context_maps(context, shape, spacing, settings):
         if np.asarray(hu).shape != shape:
             raise ValueError('Neighbor shape mismatch')
         seen.add(offset)
-        result.append((float(offset), prepare_maps(hu, liver, spacing, settings)))
+        result.append((float(offset), prepare_maps(hu, liver, spacing, settings, preprocessed=preprocessed)))
     if sum(x < 0 for x in seen) > 2 or sum(x > 0 for x in seen) > 2:
         raise ValueError('At most two neighbors per side')
     return result
@@ -348,10 +348,10 @@ def refine_candidates(prepared, generated, settings):
                 effective_parameters=cfg,failed_candidates=sum(r['status']=='failed' for r in rows))
 
 
-def detect_local(hu,liver,spacing,settings,*,context=None):
+def detect_local(hu,liver,spacing,settings,*,context=None,preprocessed=False):
     cfg=validate_settings(settings)
     if cfg['context'] and context is None:
         raise ValueError('Este método requiere cortes vecinos explícitos; este flujo no está adaptado.')
-    prepared=prepare_maps(hu,liver,spacing,cfg)
-    neighbors=prepare_context_maps(context,prepared['image'].shape,spacing,cfg) if cfg['context'] else None
+    prepared=prepare_maps(hu,liver,spacing,cfg,preprocessed=preprocessed)
+    neighbors=prepare_context_maps(context,prepared['image'].shape,spacing,cfg,preprocessed=preprocessed) if cfg['context'] else None
     return refine_candidates(prepared,build_candidates(prepared,cfg,neighbors),cfg)

@@ -13,12 +13,12 @@ detection:
   enabled: false
   high: 1.0
   low: 0.33
-  method: local_growth
+  method: hysteresis
   min_area_mm2: 1.0
   noise_floor_hu: 5.0
   sigma_mm: 0.6
 edge_analysis:
-  operator: none
+  operator: sobel
   sharpen_alpha: 0.5
 features:
   glcm_levels: 16
@@ -30,13 +30,13 @@ output_dir: results
 preprocessing:
   crop_margin: 8
   denoising:
-    gaussian_sigma: 1.0
+    gaussian_sigma: 0.6
     method: gaussian
   enhancement:
-    clahe_clip_limit: 0.1
-    clahe_kernel_size: 5
+    clahe_clip_limit: 0.01
+    clahe_kernel_size: 8
     contrast: 1.0
-    method: none
+    method: clahe
   hu_window:
     center: 30.0
     enabled: true
@@ -84,3 +84,4 @@ selection:
   slice_strategy: stratified
   slices_per_case: 5
 preprocessing_scope: liver
+local_pipeline: configured

@@ -5,3 +5,5 @@ detection:
   polarity: dark
   context: true
   refinement: 2.0
+
+local_pipeline: configured

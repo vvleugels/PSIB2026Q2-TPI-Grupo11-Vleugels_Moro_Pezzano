@@ -47,15 +47,16 @@ def run_experiment(config_path,run_id):
                 stem=f'case_{case:03d}_slice_{k:03d}'
                 folder=out/'diagnostics';folder.mkdir(exist_ok=True)
                 np.savez_compressed(folder/f'{stem}.npz',seeds=result['seeds'],candidates=result['candidates'],prediction=mask,
-                                    **{key:result[key] for key in ('base_mask','candidate_mask','added_mask') if key in result})
+                                    **{key:result[key] for key in ('base_mask','candidate_mask','added_mask','raw_mask') if key in result})
                 atomic_json(folder/f'{stem}.json',dict(components=result['components'],context_note=result['context_note'],
-                    **{key:result[key] for key in ('hu_effective_parameters','fallback') if key in result}))
+                    **{key:result[key] for key in ('hu_effective_parameters','fallback','pipeline_note') if key in result}))
                 rows.append(dict(configuration_id=preset_id,case_id=case,slice_index=k,pred_area=int(mask.sum()),
                     reference_area=int(reference.sum()),intersection=int((mask & reference).sum()),union=int((mask|reference).sum()),
                     dice=dice_score(mask,reference),iou=iou_score(mask,reference),reference_coverage=reference_coverage(mask,reference)))
                 display=apply_hu_window(hu,100,200)
-                export_slice_comparison(out,preset_id,int(case),k,display,display,'none',None,reference,mask,
-                                        processed_title='HU display; segmentation uses raw HU')
+                export_slice_comparison(out,preset_id,int(case),k,display,result.get('processed_image',display),'none',None,reference,mask,
+                                        processed_title=('Configured preprocessing + morphology' if 'processed_image' in result
+                                                         else 'HU display; segmentation uses raw HU'))
             print(f'Evaluado caso {case}: {preset_id}',flush=True)
         frame=pd.DataFrame(rows);cases,summary=aggregate_metrics(frame)
         for name,table in [('metrics_per_slice',frame),('metrics_per_case',cases),('summary',summary)]:table.to_csv(out/f'{name}.csv',index=False)

@@ -1537,3 +1537,35 @@ Ver [protocolo reproducible](experiments/hybrid_candidates/README.md) e
 [informe completo](reports/experimento_hibrido_2026-11-05.md). Se trata de una
 cohorte previamente explorada, con selección por referencia y ROI hepática
 conocida; los resultados no validan generalización externa.
+
+### Growth con preprocesamiento configurado
+
+`local_pipeline: configured` hace que los detectores locales del despachador
+compartido usen `preprocessing` antes de detectar y `segmentation` para el
+filtrado final (apertura, cierre, relleno, elemento, radio y área mínima en
+píxeles). No aplica el umbral Otsu/global/estadístico a growth.
+El config principal usa Otsu; el preset `preset_growth.yaml` activa esta
+ruta local. En la GUI aparece la casilla «Locales: usar preprocesamiento y morfología
+del config»; los controles actuales se usan tanto en preview como en la corrida.
+Los valores efectivos se toman de los controles actuales o del config cargado.
+
+Se omite el suavizado inicial propio `detection.sigma_mm` para no filtrar dos
+veces. Se mantienen los mapas de fondo multiescala de growth. Los vecinos
+reciben el mismo procedimiento. La imagen normalizada se reescala por el ancho
+de ventana (o rango hepático si no hay ventana) antes de usar el piso de ruido
+HU; con realces no lineales esa escala es equivalente, no HU medidos.
+Los parámetros de semillas, tolerancia, polaridad y contexto siguen siendo
+los del detector/preset. Las imágenes muestran el preprocesamiento aplicado;
+los diagnósticos guardan `raw_mask` antes del filtrado y `prediction` final.
+Los registros de candidatos describen la etapa anterior al filtrado final.
+
+Sin `local_pipeline`, o con `local_pipeline: raw_hu`, se conserva el método
+anterior para reproducir configuraciones guardadas. Esta nueva variante cambia
+el algoritmo: sus métricas deben obtenerse en una corrida nueva; no se ha
+establecido que mejore los resultados anteriores.
+
+El default de `config.yaml` reproduce los parámetros de la mejor corrida Otsu
+`20261105-154519`: detector HU/local desactivado, ventana 30/150, gaussiano
+sigma 0,6 píxeles, CLAHE 0,01 con ventana 8, contraste 1, apertura/cierre con
+disco de radio 2, relleno y área mínima 50 píxeles. Se conserva Sobel para el
+análisis de bordes de esa configuración. Reiniciar la GUI carga estos defaults.

@@ -131,6 +131,12 @@ def configured_prediction(hu, liver, spacing, cfg, legacy_settings=None, *, cont
             return detect_hybrid(hu, liver, spacing,
                                  {k: v for k, v in detector.items() if k != 'enabled'})
         if str(detector.get('method', '')).startswith('local_'):
+            if cfg.get('local_pipeline', 'raw_hu') == 'configured':
+                from .local_pipeline import detect_configured_local
+                return detect_configured_local(hu, liver, spacing, cfg,
+                                               legacy_settings, context=context)
+            if cfg.get('local_pipeline', 'raw_hu') != 'raw_hu':
+                raise ValueError('Unknown local_pipeline')
             from .local_segmentation import detect_local
             return detect_local(hu, liver, spacing,
                                 {k: v for k, v in detector.items() if k != 'enabled'},
