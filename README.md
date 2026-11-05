@@ -658,3 +658,15 @@ explorados: el estudio sigue siendo interno y exploratorio. Las figuras y los
 conteos externos utilizan exactamente las mismas máscaras. `--resume` reutiliza
 las máscaras completas y los conteos de uniones guardados; rechaza cambios en
 la configuración o en la selección congelada.
+
+## Nueva comparación local automática (preparada; ejecución pendiente)
+
+Se incorporó una rama experimental sin ML con candidatos automáticos en HU,
+crecimiento adaptativo, contornos activos locales y graph cuts. Compara contexto
+vecino y candidatos hipodensos/hiperdensos en una grilla congelada de 108 variantes.
+La máscara hepática es una entrada conocida; las etiquetas tumorales solo evalúan.
+
+La instalación Linux, pruebas pendientes, preflight, ejecución, reanudación,
+análisis y uso de presets en GUI están documentados en
+[`experiments/local_candidates/README.md`](experiments/local_candidates/README.md).
+No se ejecutó el barrido ni se cambiaron defaults durante esta implementación.

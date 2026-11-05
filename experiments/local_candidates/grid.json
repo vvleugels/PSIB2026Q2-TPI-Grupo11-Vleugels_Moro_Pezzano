@@ -1,0 +1,2378 @@
+[
+  {
+    "configuration_id": "local_000",
+    "settings": {
+      "method": "local_growth",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 1.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_001",
+    "settings": {
+      "method": "local_growth",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 2.0,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_002",
+    "settings": {
+      "method": "local_growth",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 2.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_003",
+    "settings": {
+      "method": "local_contour",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_004",
+    "settings": {
+      "method": "local_contour",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_005",
+    "settings": {
+      "method": "local_contour",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_006",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_007",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_008",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_009",
+    "settings": {
+      "method": "local_growth",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 1.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_010",
+    "settings": {
+      "method": "local_growth",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 2.0,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_011",
+    "settings": {
+      "method": "local_growth",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 2.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_012",
+    "settings": {
+      "method": "local_contour",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_013",
+    "settings": {
+      "method": "local_contour",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_014",
+    "settings": {
+      "method": "local_contour",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_015",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_016",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_017",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 1.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_018",
+    "settings": {
+      "method": "local_growth",
+      "high": 1.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 1.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_019",
+    "settings": {
+      "method": "local_growth",
+      "high": 1.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 2.0,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_020",
+    "settings": {
+      "method": "local_growth",
+      "high": 1.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 2.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_021",
+    "settings": {
+      "method": "local_contour",
+      "high": 1.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_022",
+    "settings": {
+      "method": "local_contour",
+      "high": 1.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_023",
+    "settings": {
+      "method": "local_contour",
+      "high": 1.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_024",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 1.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_025",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 1.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_026",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 1.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_027",
+    "settings": {
+      "method": "local_growth",
+      "high": 1.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 1.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_028",
+    "settings": {
+      "method": "local_growth",
+      "high": 1.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 2.0,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_029",
+    "settings": {
+      "method": "local_growth",
+      "high": 1.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 2.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_030",
+    "settings": {
+      "method": "local_contour",
+      "high": 1.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_031",
+    "settings": {
+      "method": "local_contour",
+      "high": 1.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_032",
+    "settings": {
+      "method": "local_contour",
+      "high": 1.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_033",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 1.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_034",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 1.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_035",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 1.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_036",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 1.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_037",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 2.0,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_038",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 2.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_039",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_040",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_041",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_042",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_043",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_044",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_045",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 1.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_046",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 2.0,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_047",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 2.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_048",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_049",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_050",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_051",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_052",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_053",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.0,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_054",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.0,
+      "polarity": "both",
+      "context": false,
+      "refinement": 1.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_055",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.0,
+      "polarity": "both",
+      "context": false,
+      "refinement": 2.0,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_056",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.0,
+      "polarity": "both",
+      "context": false,
+      "refinement": 2.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_057",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.0,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_058",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.0,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_059",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.0,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_060",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.0,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_061",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.0,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_062",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.0,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_063",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.0,
+      "polarity": "both",
+      "context": true,
+      "refinement": 1.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_064",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.0,
+      "polarity": "both",
+      "context": true,
+      "refinement": 2.0,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_065",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.0,
+      "polarity": "both",
+      "context": true,
+      "refinement": 2.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_066",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.0,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_067",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.0,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_068",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.0,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_069",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.0,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_070",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.0,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_071",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.0,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_072",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 1.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_073",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 2.0,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_074",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 2.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_075",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_076",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_077",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_078",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_079",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_080",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": false,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_081",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 1.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_082",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 2.0,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_083",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 2.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_084",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_085",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_086",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_087",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_088",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_089",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.5,
+      "polarity": "dark",
+      "context": true,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_090",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 1.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_091",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 2.0,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_092",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 2.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_093",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_094",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_095",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_096",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_097",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_098",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.5,
+      "polarity": "both",
+      "context": false,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_099",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 1.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_100",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 2.0,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_101",
+    "settings": {
+      "method": "local_growth",
+      "high": 2.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 2.5,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_102",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_103",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_104",
+    "settings": {
+      "method": "local_contour",
+      "high": 2.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_105",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.1,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_106",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.3,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  },
+  {
+    "configuration_id": "local_107",
+    "settings": {
+      "method": "local_graphcut",
+      "high": 2.5,
+      "polarity": "both",
+      "context": true,
+      "refinement": 0.6,
+      "sigma_mm": 0.6,
+      "background_mm": [
+        3.0,
+        6.0,
+        12.0
+      ],
+      "noise_floor_hu": 5.0,
+      "low": 0.5,
+      "separation_mm": 2.0,
+      "margin_mm": 5.0,
+      "window_mm": 5.0,
+      "max_iterations": 150
+    }
+  }
+]

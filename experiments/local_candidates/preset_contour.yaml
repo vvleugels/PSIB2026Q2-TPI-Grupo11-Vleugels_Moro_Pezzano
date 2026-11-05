@@ -1,0 +1,7 @@
+detection:
+  enabled: true
+  method: local_contour
+  high: 2.0
+  polarity: dark
+  context: true
+  refinement: 0.3

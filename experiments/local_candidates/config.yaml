@@ -1,0 +1,8 @@
+# All paths relative to this file. Override --data-dir on the destination PC.
+data_dir: ../../data/Selected_database
+output_dir: ../../results/local_candidates
+selection: selection.csv
+folds: folds.json
+controls: controls.json
+grid: grid.json
+workers: 1

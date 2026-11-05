@@ -315,6 +315,11 @@ def run_experiment(config_path, run_id, sweep=False):
         raise ValueError("run-id solo admite letras ASCII, números, guiones y guiones bajos.")
     cfg = load_config(config_path)
     if cfg.get("detection", {}).get("enabled", False):
+        if str(cfg['detection'].get('method', '')).startswith('local_'):
+            if sweep:
+                raise ValueError('Para el barrido local use scripts/run_local_search.py; no se reutiliza la grilla histórica.')
+            from scripts.run_local_segmentation import run_experiment as run_local
+            return run_local(config_path, run_id)
         from scripts.run_detection import run_experiment as run_detection
         return run_detection(config_path, run_id, sweep=sweep)
     out = Path(cfg["_output_dir"]) / "segmentation" / run_id

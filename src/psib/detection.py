@@ -122,10 +122,15 @@ def detect_slice(hu, liver_mask, spacing_mm, settings):
     return detect_prepared(prepare_detection(hu, liver_mask, spacing_mm, settings), settings)
 
 
-def configured_prediction(hu, liver, spacing, cfg, legacy_settings=None):
+def configured_prediction(hu, liver, spacing, cfg, legacy_settings=None, *, context=None):
     """Shared GUI/2D/3D dispatch, with historical 2D behavior preserved."""
     detector = cfg.get('detection', {})
     if detector.get('enabled', False):
+        if str(detector.get('method', '')).startswith('local_'):
+            from .local_segmentation import detect_local
+            return detect_local(hu, liver, spacing,
+                                {k: v for k, v in detector.items() if k != 'enabled'},
+                                context=context)
         return detect_slice(hu, liver, spacing, {k: v for k, v in detector.items() if k != 'enabled'})
     from .preprocessing import prepare_denoised_slice, enhance
     from .segmentation import segment_slice

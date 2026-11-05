@@ -12,6 +12,7 @@ import ctypes
 import subprocess
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -345,7 +346,22 @@ class TpiLauncher:
         self.detection_method = tk.StringVar(value=detection.get("method", "hysteresis"))
         ttk.Checkbutton(parent, text="Detector HU experimental (prioriza sensibilidad)",
                         variable=self.detection_enabled).pack(anchor="w")
-        self.labeled_combo(parent, "Salida del detector", self.detection_method, ("hysteresis", "watershed"))
+        self.labeled_combo(parent, "Salida del detector", self.detection_method,
+                           ("hysteresis", "watershed", "local_growth", "local_contour", "local_graphcut"))
+        self.local_high = tk.StringVar(value=str(detection.get("high", 2.) if str(detection.get("method", "")).startswith("local_") else 2.))
+        self.local_refinement = tk.StringVar(value=str(detection.get("refinement", 2.)))
+        self.local_polarity = tk.StringVar(value=detection.get("polarity", "dark"))
+        self.local_context = tk.BooleanVar(value=detection.get("context", True))
+        self.local_overlays = tk.BooleanVar(value=False)
+        self.local_parameters = ({k: v for k, v in detection.items() if k != "enabled"}
+                                 if str(detection.get("method", "")).startswith("local_") else {})
+        self.labeled_entry(parent, "Semillas locales (1,5 / 2 / 2,5)", self.local_high)
+        self.labeled_entry(parent, "Tolerancia crecimiento / peso contorno-grafo", self.local_refinement)
+        self.labeled_combo(parent, "Candidatos locales", self.local_polarity, ("dark", "both"))
+        ttk.Checkbutton(parent, text="Usar cortes vecinos (métodos locales)", variable=self.local_context).pack(anchor="w")
+        ttk.Checkbutton(parent, text="Mostrar semillas y candidatos", variable=self.local_overlays,
+                        command=self.redraw_local_overlay).pack(anchor="w")
+        ttk.Button(parent, text="Cargar preset local YAML", command=self.load_local_preset).pack(fill="x")
         self.detection_vars = {}
         for key, label, default in (("sigma_mm", "Suavizado (mm)", 0.6),
                                      ("high", "Umbral de semillas", 1.0),
@@ -715,7 +731,73 @@ class TpiLauncher:
         config.setdefault("detection", {}).update(enabled=self.detection_enabled.get(),
                                                   method=self.detection_method.get(),
                                                   **{key: float(value.get()) for key, value in self.detection_vars.items()})
+        if self.detection_method.get().startswith("local_"):
+            from psib.local_segmentation import validate_settings
+            parameters = validate_settings({**self.local_parameters, "method": self.detection_method.get(),
+                "high": float(self.local_high.get()), "refinement": float(self.local_refinement.get()),
+                "polarity": self.local_polarity.get(), "context": self.local_context.get()})
+            config["detection"] = dict(enabled=self.detection_enabled.get(), **parameters)
         return config, segment
+
+    def load_local_preset(self) -> None:
+        path = filedialog.askopenfilename(filetypes=[("YAML", "*.yaml *.yml")])
+        if not path:
+            return
+        try:
+            from psib.local_segmentation import validate_settings
+            values = yaml.safe_load(Path(path).read_text())["detection"]
+            settings = validate_settings({k: v for k, v in values.items() if k != "enabled"})
+            self.local_parameters = settings
+            self.detection_enabled.set(True)
+            self.detection_method.set(settings["method"])
+            self.local_high.set(str(settings["high"]))
+            self.local_refinement.set(str(settings["refinement"]))
+            self.local_polarity.set(settings["polarity"])
+            self.local_context.set(settings["context"])
+            self.append_log("Preset local cargado; aplicar al corte para calcularlo.")
+        except Exception as exc:
+            messagebox.showerror("Preset local inválido", str(exc))
+
+    def redraw_local_overlay(self) -> None:
+        if self.current_hu is not None:
+            source = self.current_hu if self.view_mode.get() == "Antes" or self.current_processed is None else self.current_processed
+            self.draw_case_image(source)
+
+    def start_local_preview(self, config, settings, k, token):
+        from psib.local_segmentation import context_from_volume
+        if not hasattr(self, "local_executor"):
+            self.local_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="local-preview")
+        if getattr(self, "local_future", None) is not None:
+            self.local_future.cancel()
+        volume, labels, spacing = self.case_volume, self.case_labels, self.case_spacing
+        def compute():
+            liver = labels > 0
+            context = context_from_volume(volume, liver, k, spacing) if config["detection"]["context"] else None
+            return configured_prediction(volume[:, :, k], liver[:, :, k], spacing, config, settings, context=context)
+        future = self.local_executor.submit(compute)
+        self.local_future = future
+        self.metrics_text.set("Calculando segmentación local experimental…")
+        self.root.after(50, lambda: self.finish_local_preview(token, future))
+
+    def finish_local_preview(self, token, future):
+        if token != getattr(self, "local_preview_token", None):
+            return
+        if not future.done():
+            self.root.after(50, lambda: self.finish_local_preview(token, future))
+            return
+        try:
+            result = future.result()
+            self.current_local_result = result
+            self.current_prediction = result["mask"]
+            self.redraw_local_overlay()
+            self.update_slice_metrics()
+            if result["failed_candidates"]:
+                self.append_log(f"Método local: {result['failed_candidates']} candidatos fallidos; no se aplicó otro método.")
+            self.refresh_steps()
+        except Exception as exc:
+            self.current_prediction = None
+            self.metrics_text.set("Falló la segmentación local; consultar el registro.")
+            self.append_log(f"Segmentación local: {exc}")
 
     def apply_preprocessing(self) -> None:
         self.show_case_slice(segment=False)
@@ -724,6 +806,8 @@ class TpiLauncher:
         self.show_case_slice(segment=True)
 
     def show_case_slice(self, segment: bool = False) -> None:
+        self.local_preview_token = getattr(self, "local_preview_token", 0) + 1
+        self.current_local_result = None
         if self.case_volume is None or self.case_labels is None:
             return
         k = max(0, min(int(self.slice_var.get()), self.case_volume.shape[2] - 1))
@@ -738,7 +822,11 @@ class TpiLauncher:
             self.current_processed = prepare_denoised_slice(self.current_hu, config)
             self.current_processed = enhance(self.current_processed, config.get("preprocessing", {}).get("enhancement", {}))
             liver = self.current_labels > 0
-            self.current_prediction = configured_prediction(self.current_hu, liver, self.case_spacing, config, settings)["mask"]
+            if config.get("detection", {}).get("enabled") and config["detection"]["method"].startswith("local_"):
+                self.current_prediction = None
+                self.start_local_preview(config, settings, k, self.local_preview_token)
+            else:
+                self.current_prediction = configured_prediction(self.current_hu, liver, self.case_spacing, config, settings)["mask"]
         except (ValueError, KeyError) as exc:
             self.current_prediction = None
             self.append_log(f"Parámetros inválidos: {exc}")
@@ -780,6 +868,13 @@ class TpiLauncher:
             if self.show_prediction.get() and self.current_prediction is not None:
                 mask = self.current_prediction[x0:x1, y0:y1]
                 rgb[mask] = (rgb[mask] * (1 - opacity) + np.array((255, 155, 40)) * opacity).astype(np.uint8)
+            result = getattr(self, "current_local_result", None)
+            if result is not None and self.local_overlays.get():
+                candidate = result["candidates"][x0:x1, y0:y1]
+                edge = candidate & ~ndimage.binary_erosion(candidate)
+                rgb[edge] = (180, 80, 255)
+                seed = result["seeds"][x0:x1, y0:y1]
+                rgb[seed] = (80, 255, 80)
         self.figure_image = Image.fromarray(rgb.transpose(1, 0, 2))
         self.figure_photo = None
         self.empty_message = ""
@@ -1261,6 +1356,7 @@ class TpiLauncher:
 
     def reset_results_view(self, message: str) -> None:
         """Clear displayed results without deleting prior files from disk."""
+        self.local_preview_token = getattr(self, "local_preview_token", 0) + 1
         self.results_dir = None
         self.figures = []
         self.results_files = []
@@ -1621,6 +1717,9 @@ class TpiLauncher:
             if not messagebox.askyesno("Ejecución en curso", "¿Cerrar y detener la ejecución actual?"):
                 return
             self.process.terminate()
+        self.local_preview_token = getattr(self, "local_preview_token", 0) + 1
+        if hasattr(self, "local_executor"):
+            self.local_executor.shutdown(wait=False, cancel_futures=True)
         self.root.destroy()
 
 
