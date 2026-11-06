@@ -127,9 +127,30 @@ capacidad diagnóstica autónoma.
 Después de generar la selección:
 
 ```bash
-python scripts/analyze_morphology_3d.py
+python scripts/analyze_morphology_3d.py                 # opcional: --cases 3 10 --run-id NOMBRE
 python scripts/evaluate_morphology_3d.py --run-id ID_CORRIDA --configuration-id cfg_000
+# opcional: --cases 3 10 · --min-component-mm3 50 · --min-slices 2 · --save-masks
 ```
+
+`analyze_morphology_3d.py` escribe en `results/morphology_3d/<fecha-hora>/`; las
+columnas `largest_*` describen la lesión más grande y `max_axial_feret_all_mm`
+el máximo sobre todas. Los casos sin tumor dejan los tamaños en NaN.
+
+`evaluate_morphology_3d.py` escribe además `morphology_3d_prediction_lesions.csv`
+(una fila por lesión de referencia: detectada, cobertura, Dice de lesión) y
+`morphology_3d_prediction_by_size.csv` (detección y Dice por diámetro axial
+<10, 10–20, ≥10 y ≥20 mm). Las lesiones se cuentan con conectividad 26, para
+que fragmentos de la anotación unidos por una arista o vértice no cuenten como
+lesiones aparte. Una lesión está *detectada* si la toca alguna componente
+predicha y su IoU de lesión es ≥ `lesion_eval.min_iou`; está *cubierta* si al
+menos el 50 % de sus vóxeles fue predicho. Usar la tasa de cubiertas: una región
+falsa grande que solo roza una lesión pequeña la marca como detectada.
+
+Límites a declarar: la ROI hepática es la de referencia (`liver_roi=reference`),
+por lo que no hay falsos positivos fuera del hígado y el Dice es optimista. El
+filtro 3D (`morphology3d_prediction`: `min_component_voxels`, y opcionalmente
+`min_component_mm3` y `min_slices`) se aplica solo a la predicción; el umbral en
+vóxeles cambia de tamaño físico con el espaciado, el de mm³ no.
 
 El primer comando mide máscaras de referencia; el segundo aplica el segmentador
 2D a los cortes de los volúmenes y los apila. Es una extensión exploratoria, no

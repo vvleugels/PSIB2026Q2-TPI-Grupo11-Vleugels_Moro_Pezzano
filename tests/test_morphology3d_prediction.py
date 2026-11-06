@@ -75,6 +75,21 @@ class Morphology3DPredictionTests(unittest.TestCase):
             self.assertAlmostEqual(result.clean_volume_relative_error, 0.0)
             self.assertTrue((output / "comparison_3d.png").is_file())
             self.assertTrue((output / "case_001_masks_3d.npz").is_file())
+            self.assertEqual(result.reference_lesions, 1)
+            self.assertEqual(result.detected_lesions, 1)
+            self.assertEqual(result.false_positive_components, 0)
+            self.assertEqual(result.liver_roi, "reference")
+            lesions = pd.read_csv(output / "morphology_3d_prediction_lesions.csv")
+            self.assertEqual(len(lesions), 1)
+            self.assertAlmostEqual(lesions.lesion_dice.iloc[0], 1.0)
+            by_size = pd.read_csv(output / "morphology_3d_prediction_by_size.csv").set_index("size_group")
+            self.assertAlmostEqual(by_size.loc["all", "detection_rate"], 1.0)
+
+            subset = evaluate(run, data, min_component_voxels=8, output_name="subset",
+                              case_ids=[1], save_masks=False)
+            self.assertFalse((subset / "case_001_masks_3d.npz").exists())
+            with self.assertRaises(ValueError):
+                evaluate(run, data, output_name="missing", case_ids=[99])
 
 
 if __name__ == "__main__":

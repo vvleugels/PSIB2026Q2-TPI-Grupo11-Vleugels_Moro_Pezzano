@@ -320,7 +320,7 @@ def run_experiment(config_path, run_id, sweep=False):
     if cfg.get("detection", {}).get("enabled", False):
         if str(cfg['detection'].get('method', '')).startswith('local_') or cfg['detection'].get('method') == 'hybrid_size':
             if sweep:
-                raise ValueError('Para el barrido local use scripts/run_local_search.py; no se reutiliza la grilla histórica.')
+                raise ValueError('El barrido (--sweep) no admite detectores locales ni híbridos en esta versión; ejecute la configuración sin --sweep.')
             from scripts.run_local_segmentation import run_experiment as run_local
             return run_local(config_path, run_id)
         from scripts.run_detection import run_experiment as run_detection

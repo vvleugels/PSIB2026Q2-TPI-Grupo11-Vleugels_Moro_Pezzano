@@ -69,6 +69,24 @@ class RunTPITests(unittest.TestCase):
         self.data.mkdir()
         self.check_data_choice(self.fallback)
 
+    def test_fallback_caps_requested_cases_to_available(self):
+        self.config.write_text(yaml.safe_dump({
+            "data_dir": "configured", "output_dir": "custom-results",
+            "selection": {"n_cases": 131, "candidate_pool_size": 131, "slices_per_case": 3},
+        }))
+        self.save_data(self.fallback)
+        seen = []
+
+        def inspect(path, *args):
+            seen.append(yaml.safe_load(path.read_text())["selection"])
+            return self.root / "custom-results" / "segmentation" / "20261031-180409"
+
+        with patch.object(launcher, "select_2d", side_effect=inspect), \
+                patch.object(launcher, "run_experiment", side_effect=inspect):
+            launcher.run_tpi(self.config)
+        self.assertEqual(seen[0]["n_cases"], 1)
+        self.assertEqual(seen[0]["candidate_pool_size"], 1)
+
     def test_errors_when_neither_directory_has_pairs(self):
         with patch.object(launcher, "select_2d") as select:
             with self.assertRaisesRegex(FileNotFoundError, "No paired CT/mask cases"):

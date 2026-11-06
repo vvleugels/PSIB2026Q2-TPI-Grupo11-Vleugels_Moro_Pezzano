@@ -109,8 +109,11 @@ principal. Los presets locales de growth, contornos y graph cut están en
 `config/presets/` y se cargan con **Cargar preset local YAML**. Para restaurar
 los parámetros finales, volver a cargar `config.yaml`.
 
-**Cuantificación** permite analizar máscaras 3D de referencia y ejecutar
-compresión y reconstrucción. Estas dos últimas requieren generar antes la
+**Cuantificación** permite analizar máscaras 3D de referencia (**Analizar 3D**),
+segmentar en 3D apilando el segmentador 2D de la última corrida
+(**Segmentar en 3D**: Dice 3D por caso y detección de lesiones por tamaño) y
+ejecutar compresión y reconstrucción. Si hay casos marcados en la lista de
+casos, el análisis 3D usa solo esos. Estas dos últimas requieren generar antes la
 selección 2D. **Resultados** muestra los archivos generados. La interfaz permite
 cancelar trabajos; sus preferencias locales se guardan en `.psib_gui/`.
 

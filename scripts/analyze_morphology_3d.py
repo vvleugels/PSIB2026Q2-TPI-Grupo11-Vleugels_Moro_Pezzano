@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
+import re
 import sys
 from pathlib import Path
 
@@ -18,7 +20,7 @@ from skimage.measure import marching_cubes
 
 from psib.config import load_config
 from psib.data_io import load_segmentation
-from psib.morphology3d import tumor_components_3d
+from psib.morphology3d import latest_morphology_output as latest_output, tumor_components_3d
 
 
 def export_surface(path: Path, case_id: int, segmentation: np.ndarray, spacing, components) -> None:
@@ -63,21 +65,32 @@ def export_surface(path: Path, case_id: int, segmentation: np.ndarray, spacing, 
     plt.close(fig)
 
 
-def analyze(config_path: Path) -> Path:
+def analyze(config_path: Path, run_id: str | None = None, case_ids=None) -> Path:
     cfg = load_config(config_path)
-    output = Path(cfg["_output_dir"]) / "morphology_3d"
-    output.mkdir(parents=True, exist_ok=True)
+    run_id = run_id or datetime.now().strftime("%Y%m%d-%H%M%S")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", run_id):
+        raise ValueError("run-id solo admite letras ASCII, números, guiones y guiones bajos.")
+    # One folder per run, so surfaces from earlier selections never mix with this one.
+    output = Path(cfg["_output_dir"]) / "morphology_3d" / run_id
+    if output.exists():
+        raise FileExistsError(f"Ya existe {output}; use otro --run-id.")
     selection_path = Path(cfg["_output_dir"]) / "selected_cases_slices.csv"
     if not selection_path.is_file():
         raise FileNotFoundError("Falta selected_cases_slices.csv. Ejecutá primero el flujo 2D para seleccionar los casos.")
     selected = pd.read_csv(selection_path)
     if "case_id" not in selected or selected.empty:
         raise ValueError("La selección está vacía o no tiene la columna case_id.")
-    case_ids = sorted(pd.to_numeric(selected["case_id"], errors="raise").astype(int).unique())
+    available = sorted(pd.to_numeric(selected["case_id"], errors="raise").astype(int).unique())
+    if case_ids:
+        missing = sorted(set(map(int, case_ids)) - set(available))
+        if missing:
+            raise ValueError(f"Casos no presentes en la selección: {missing}")
+        available = sorted(set(map(int, case_ids)))
+    output.mkdir(parents=True)
 
     summaries, lesions = [], []
-    for case_id in case_ids:
-        print(f"Analizando morfología 3D del caso {case_id:03d}…", flush=True)
+    for position, case_id in enumerate(available, start=1):
+        print(f"Analizando morfología 3D del caso {case_id:03d} ({position}/{len(available)})…", flush=True)
         segmentation = load_segmentation(case_id, cfg["data_dir"])
         spacing = _spacing_for_case(case_id, cfg["data_dir"])
         components, render_data = tumor_components_3d(segmentation, spacing)
@@ -86,22 +99,29 @@ def analyze(config_path: Path) -> Path:
         total_volume = voxel_count * float(np.prod(spacing)) / 1000.0
         liver_volume = liver_voxel_count * float(np.prod(spacing)) / 1000.0
         largest = components[0] if components else None
+        # Tumor-free cases have no lesion size: NaN keeps them out of size means.
+        size_of = (lambda key: largest[key] if largest else float("nan"))
         summaries.append({
             "case_id": case_id,
             "tumor_voxels": voxel_count,
             "tumor_volume_cm3": total_volume,
             "liver_voxels": liver_voxel_count,
             "liver_volume_cm3": liver_volume,
-            "tumor_burden": total_volume / liver_volume if liver_volume else 0.0,
+            "tumor_burden": total_volume / liver_volume if liver_volume else float("nan"),
             "connected_components_6": len(components),
-            "largest_component_cm3": largest["volume_cm3"] if largest else 0.0,
-            "largest_extent_x_mm": largest["extent_x_mm"] if largest else 0.0,
-            "largest_extent_y_mm": largest["extent_y_mm"] if largest else 0.0,
-            "largest_extent_z_mm": largest["extent_z_mm"] if largest else 0.0,
-            "max_feret_3d_mm": largest["max_feret_3d_mm"] if largest else 0.0,
-            "max_axial_feret_mm": largest["max_axial_feret_mm"] if largest else 0.0,
-            "equivalent_diameter_mm": largest["equivalent_diameter_mm"] if largest else 0.0,
-            "bbox_diagonal_mm": largest["bbox_diagonal_mm"] if largest else 0.0,
+            "lesions_ge10mm": sum(item["max_axial_feret_mm"] >= 10 for item in components),
+            "lesions_ge20mm": sum(item["max_axial_feret_mm"] >= 20 for item in components),
+            "largest_component_cm3": size_of("volume_cm3"),
+            "largest_extent_x_mm": size_of("extent_x_mm"),
+            "largest_extent_y_mm": size_of("extent_y_mm"),
+            "largest_extent_z_mm": size_of("extent_z_mm"),
+            "largest_max_feret_3d_mm": size_of("max_feret_3d_mm"),
+            "largest_max_axial_feret_mm": size_of("max_axial_feret_mm"),
+            "largest_equivalent_diameter_mm": size_of("equivalent_diameter_mm"),
+            "largest_bbox_diagonal_mm": size_of("bbox_diagonal_mm"),
+            # Over all components; same definition as reference_max_axial_feret_mm in 3D evaluation.
+            "max_axial_feret_all_mm": (max(item["max_axial_feret_mm"] for item in components)
+                                       if components else float("nan")),
             "spacing_x_mm": spacing[0], "spacing_y_mm": spacing[1], "spacing_z_mm": spacing[2],
         })
         for item in components:
@@ -133,9 +153,11 @@ def _spacing_for_case(case_id: int, data_dir: Path) -> tuple[float, float, float
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / "config.yaml")
+    parser.add_argument("--run-id", default=None, help="Carpeta de salida dentro de results/morphology_3d (por defecto, fecha y hora)")
+    parser.add_argument("--cases", type=int, nargs="+", default=None, help="Analizar solo estos casos de la selección")
     args = parser.parse_args()
     try:
-        analyze(args.config.resolve())
+        analyze(args.config.resolve(), args.run_id, args.cases)
     except (OSError, ValueError) as exc:
         parser.exit(1, f"Error en el análisis morfológico 3D: {exc}\n")
 

@@ -35,6 +35,8 @@ from psib.app_icon import load_icon_images, warn_icon_once
 from scipy import ndimage
 
 DEFAULT_CONFIG = ROOT / "config.yaml"
+# Rough wall time to segment every slice of one LiTS volume, for the 3D confirmation dialog.
+SECONDS_PER_3D_CASE = 30
 EXPERIMENT_CONTROLS = ROOT / "config" / "presets" / "controls.json"
 EXPERIMENT_PRESETS = ("hu_sensitive", "default", "otsu_059")
 RESULT_PREFIX = "TPI run completed. Results are in "
@@ -421,7 +423,8 @@ class TpiLauncher:
                 "otsu": "Otsu calcula el umbral de cada corte. Elegí global para probar un valor manual.",
                 "statistical": "El método estadístico calcula el umbral con k y la dirección.",
             }
-            method_hint.configure(text="La predicción usa el detector activo." if detector_enabled else hints[method])
+            method_hint.configure(text="La predicción usa el detector activo." if detector_enabled
+                                  else hints.get(method, f"Método '{method}' no reconocido por la GUI."))
 
         self.segmentation_vars["method"].trace_add("write", update_threshold_controls)
         self.detection_enabled.trace_add("write", update_threshold_controls)
@@ -460,6 +463,8 @@ class TpiLauncher:
                   style="Body.TLabel", wraplength=255).pack(anchor="w", pady=(4, 2))
         ttk.Button(parent, text="Aplicar preset", style="Secondary.TButton",
                    command=self.apply_experiment_preset).pack(fill="x", pady=(4, 2))
+        ttk.Button(parent, text="Restaurar parámetros del config", style="Secondary.TButton",
+                   command=self.restore_config_values).pack(fill="x", pady=(0, 2))
         self.preset_status = tk.StringVar(value="Aplicá un preset para cargar sus campos editables.")
         ttk.Label(parent, textvariable=self.preset_status, style="Body.TLabel",
                   wraplength=255).pack(anchor="w")
@@ -467,13 +472,19 @@ class TpiLauncher:
 
     def build_quantification_section(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Cuantificación 3D", style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 8))
-        ttk.Label(parent, text="Analiza las máscaras de referencia seleccionadas: volumen, diámetro máximo y componentes 6-conexos. La segmentación automática 3D aún no está implementada.",
+        ttk.Label(parent, text="Analizar 3D mide las máscaras de referencia (volumen, diámetro, componentes 6-conexos). "
+                  "Segmentar en 3D aplica el segmentador 2D de la última corrida a todos los cortes, "
+                  "apila el volumen y lo compara con la referencia por vóxel y por lesión. "
+                  "Usa los casos marcados en la lista de casos, o todos los de la corrida.",
                   style="Body.TLabel", wraplength=280).pack(fill="x", pady=(0, 8))
         controls = ttk.Frame(parent, style="Panel.TFrame")
         controls.pack(fill="x")
         self.morphology_button = ttk.Button(controls, text="Analizar 3D", style="Secondary.TButton",
                                             command=self.run_morphology)
         self.morphology_button.pack(side="left", fill="x", expand=True)
+        self.prediction_3d_button = ttk.Button(controls, text="Segmentar en 3D", style="Secondary.TButton",
+                                               command=self.run_prediction_3d)
+        self.prediction_3d_button.pack(side="left", fill="x", expand=True, padx=(5, 0))
         ttk.Button(controls, text="Cancelar", style="Secondary.TButton", command=self.cancel_run).pack(side="left", padx=(5, 0))
         self.compression_button = ttk.Button(parent, text="Ejecutar experimento de compresión",
                                              style="Secondary.TButton", command=self.run_compression)
@@ -481,17 +492,207 @@ class TpiLauncher:
         self.reconstruction_button = ttk.Button(parent, text="Ejecutar reconstrucción simulada",
                                                 style="Secondary.TButton", command=self.run_reconstruction)
         self.reconstruction_button.pack(fill="x", pady=2)
-        self.task_buttons = [self.selection_button, self.morphology_button,
+        self.task_buttons = [self.selection_button, self.morphology_button, self.prediction_3d_button,
                              self.compression_button, self.reconstruction_button]
-        columns = ("case_id", "lesions", "volume", "diameter")
-        self.morphology_table = ttk.Treeview(parent, columns=columns, show="headings", height=6)
-        for key, title, width in (("case_id", "Caso", 50), ("lesions", "Lesiones", 60),
-                                  ("volume", "Vol. cm³", 75), ("diameter", "Diám. axial mm", 85)):
-            self.morphology_table.heading(key, text=title)
-            self.morphology_table.column(key, width=width, anchor="center", stretch=True)
-        self.morphology_table.pack(fill="x", pady=(8, 4))
+        ttk.Label(parent, text="Referencia 3D (doble clic: ver superficie)", style="Body.TLabel").pack(anchor="w", pady=(8, 0))
+        self.morphology_table = self.sortable_table(parent, (
+            ("case_id", "Caso", 50), ("lesions", "Lesiones", 55), ("ge10", "≥10 mm", 55),
+            ("volume", "Vol. cm³", 70), ("diameter", "Diám. axial máx. mm", 95)))
+        self.morphology_table.bind("<Double-1>", self.show_morphology_surface)
+        ttk.Label(parent, text="Segmentación 3D vs referencia", style="Body.TLabel").pack(anchor="w", pady=(8, 0))
+        self.prediction_3d_table = self.sortable_table(parent, (
+            ("case_id", "Caso", 50), ("dice", "Dice 3D", 60), ("ref", "Vol. ref.", 65),
+            ("pred", "Vol. pred.", 65), ("lesions", "Lesiones cub.", 80), ("fp", "FP", 40)))
+        self.prediction_3d_summary = tk.StringVar(value="Sin resultados de segmentación 3D.")
+        ttk.Label(parent, textvariable=self.prediction_3d_summary, style="Body.TLabel",
+                  wraplength=280, justify="left").pack(fill="x", pady=(2, 4))
         ttk.Button(parent, text="Abrir resultados 3D", style="Secondary.TButton",
                    command=self.open_morphology_results).pack(fill="x")
+        ttk.Button(parent, text="Tabla por caso (corridas 2D y 3D)", style="Secondary.TButton",
+                   command=self.open_run_summary).pack(fill="x", pady=(4, 0))
+
+    def sortable_table(self, parent: ttk.Frame, columns) -> ttk.Treeview:
+        """Treeview whose columns sort numerically (then as text) when the heading is clicked."""
+        table = ttk.Treeview(parent, columns=[key for key, _, _ in columns], show="headings", height=6)
+        for key, title, width in columns:
+            table.heading(key, text=title, command=lambda column=key: self.sort_table(table, column))
+            table.column(key, width=width, anchor="center", stretch=True)
+        table.pack(fill="x", pady=(2, 4))
+        return table
+
+    @staticmethod
+    def sort_table(table: ttk.Treeview, column: str) -> None:
+        descending = getattr(table, "_sorted", None) == (column, False)
+        def key(item):
+            text = str(table.set(item, column)).split("/")[0].strip()
+            try:
+                return (0, float(text))
+            except ValueError:
+                return (1, text)
+        # Summary rows (tag "mean") stay at the bottom whatever the order.
+        children = table.get_children("")
+        fixed = [item for item in children if "mean" in table.item(item, "tags")]
+        items = sorted((item for item in children if item not in fixed), key=key, reverse=descending)
+        for position, item in enumerate(items + fixed):
+            table.move(item, "", position)
+        table._sorted = (column, descending)
+
+    def open_run_summary(self) -> None:
+        """Window with one row per case and a final mean row, for any completed run."""
+        window = getattr(self, "summary_window", None)
+        if window is not None and window.winfo_exists():
+            window.lift()
+            self.refresh_run_summary_list()
+            return
+        window = tk.Toplevel(self.root)
+        window.title("Resultados por caso · tumores medianos y grandes")
+        window.geometry("980x560")
+        self.summary_window = window
+        frame = ttk.Frame(window, padding=10)
+        frame.pack(fill="both", expand=True)
+        top = ttk.Frame(frame)
+        top.pack(fill="x")
+        ttk.Label(top, text="Corrida").pack(side="left")
+        self.summary_run_var = tk.StringVar()
+        self.summary_run_combo = ttk.Combobox(top, textvariable=self.summary_run_var, state="readonly", width=80)
+        self.summary_run_combo.pack(side="left", padx=(6, 12), fill="x", expand=True)
+        self.summary_run_combo.bind("<<ComboboxSelected>>", lambda _event: self.on_summary_run_selected())
+        ttk.Label(top, text="Configuración").pack(side="left")
+        self.summary_config_var = tk.StringVar()
+        self.summary_config_combo = ttk.Combobox(top, textvariable=self.summary_config_var, state="readonly", width=10)
+        self.summary_config_combo.pack(side="left", padx=(6, 0))
+        self.summary_config_combo.bind("<<ComboboxSelected>>", lambda _event: self.show_run_summary())
+        self.summary_info = tk.StringVar()
+        ttk.Label(frame, textvariable=self.summary_info, wraplength=940, justify="left").pack(fill="x", pady=(8, 4))
+        columns = (("case_id", "Caso", 60), ("case_dice", "Dice caso", 75), ("precision", "Precisión", 75),
+                   ("medium", "Medianos 10–20 mm (cubiertas/total)", 190), ("medium_dice", "Dice lesión med.", 105),
+                   ("large", "Grandes ≥20 mm (cubiertas/total)", 190), ("large_dice", "Dice lesión gr.", 105))
+        holder = ttk.Frame(frame)
+        holder.pack(fill="both", expand=True)
+        self.summary_table = ttk.Treeview(holder, columns=[key for key, _, _ in columns], show="headings")
+        for key, title, width in columns:
+            self.summary_table.heading(key, text=title,
+                                       command=lambda column=key: self.sort_table(self.summary_table, column))
+            self.summary_table.column(key, width=width, anchor="center", stretch=True)
+        self.summary_table.tag_configure("mean", background="#DDE7F3", font=("Segoe UI", 9, "bold"))
+        scroll = ttk.Scrollbar(holder, orient="vertical", command=self.summary_table.yview)
+        self.summary_table.configure(yscrollcommand=scroll.set)
+        self.summary_table.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        ttk.Label(frame, wraplength=940, justify="left", text=(
+            "Tamaño = diámetro axial máximo de cada lesión de referencia. Cubierta = al menos el 50 % de la "
+            "lesión fue predicho. 2D: lesiones por corte evaluado; 3D: lesiones del volumen completo. "
+            "Fila Media: Dice caso y precisión promediados sobre casos; cubiertas/total sumadas sobre casos; "
+            "Dice lesión promediado sobre todas las lesiones del grupo.")).pack(fill="x", pady=(6, 4))
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x")
+        ttk.Button(buttons, text="Actualizar lista", command=self.refresh_run_summary_list).pack(side="left")
+        self.summary_compute_button = ttk.Button(buttons, text="Calcular por tamaño (2D)",
+                                                 command=self.compute_run_summary_sizes)
+        self.summary_compute_button.pack(side="left", padx=6)
+        ttk.Button(buttons, text="Exportar CSV", command=self.export_run_summary).pack(side="left")
+        self.refresh_run_summary_list()
+
+    def refresh_run_summary_list(self) -> None:
+        from psib.run_summary import list_runs
+        try:
+            self.summary_runs = list_runs(Path(load_config(self.config_path.get())["_output_dir"]))
+        except (OSError, ValueError, KeyError) as exc:
+            self.summary_info.set(f"No se pudieron listar las corridas: {exc}")
+            return
+        labels = [run["label"] for run in self.summary_runs]
+        self.summary_run_combo.configure(values=labels)
+        if labels and self.summary_run_var.get() not in labels:
+            self.summary_run_var.set(labels[0])
+        self.on_summary_run_selected()
+
+    def selected_summary_run(self) -> dict | None:
+        for run in getattr(self, "summary_runs", []):
+            if run["label"] == self.summary_run_var.get():
+                return run
+        return None
+
+    def on_summary_run_selected(self) -> None:
+        from psib.run_summary import configurations
+        run = self.selected_summary_run()
+        if run is None:
+            self.summary_info.set("No hay corridas completadas.")
+            return
+        ids = configurations(run["path"]) if run["kind"] == "2D" else []
+        self.summary_config_combo.configure(values=ids, state="readonly" if len(ids) > 1 else "disabled")
+        if self.summary_config_var.get() not in ids:
+            self.summary_config_var.set(ids[0] if ids else "")
+        self.show_run_summary()
+
+    def show_run_summary(self) -> None:
+        from psib.run_summary import case_table
+        run = self.selected_summary_run()
+        table_widget = self.summary_table
+        for item in table_widget.get_children():
+            table_widget.delete(item)
+        if run is None:
+            return
+        try:
+            table, info = case_table(run["path"], self.summary_config_var.get() or None)
+        except (OSError, ValueError, KeyError) as exc:
+            self.summary_info.set(f"No se pudo leer la corrida: {exc}")
+            return
+        self.summary_frame = table
+        number = self._format_number
+        def counts(row, key):
+            total = row[f"{key}_total"]
+            if not np.isfinite(float(total)):
+                return "—"
+            if int(total) == 0:
+                return "0"
+            covered = int(row[f"{key}_covered"])
+            return f"{covered}/{int(total)} ({100 * covered / int(total):.0f} %)"
+        for index, row in table.iterrows():
+            is_mean = index == len(table) - 1
+            case = row["case_id"] if is_mean else f"{int(row['case_id']):03d}"
+            table_widget.insert("", "end", tags=("mean",) if is_mean else (), values=(
+                case, number(row["case_dice"], 3), number(row["precision"], 3),
+                counts(row, "medium"), number(row["medium_dice"], 3),
+                counts(row, "large"), number(row["large_dice"], 3)))
+        sizes = ("" if info["has_sizes"] else
+                 " Sin análisis por tamaño todavía: pulsá «Calcular por tamaño (2D)».")
+        self.summary_info.set(f"{run['label']} · {run['path']}.{sizes}")
+        self.summary_compute_button.configure(
+            state="normal" if run["kind"] == "2D" and not info["has_sizes"] and not self.task_running else "disabled")
+
+    def compute_run_summary_sizes(self) -> None:
+        run = self.selected_summary_run()
+        if run is None or run["kind"] != "2D" or self.task_running or self.process is not None:
+            return
+        configuration = self.summary_config_var.get() or "cfg_000"
+        command = [str(ROOT / "scripts" / "analyze_lesion_sizes_2d.py"), "--config", self.config_path.get(),
+                   "--run-id", run["path"].name, "--configuration-id", configuration]
+        self.morphology_pending = ("lesion2d", run["path"])
+        self.cancel_requested = False
+        self.task_running = True
+        self.run_button.configure(state="disabled")
+        for button in self.task_buttons:
+            button.configure(state="disabled")
+        self.summary_compute_button.configure(state="disabled")
+        self.cancel_button.configure(state="normal")
+        self.log_meta.set("ANÁLISIS POR TAMAÑO")
+        self.set_status(f"Midiendo lesiones de {run['path'].name}…", "running")
+        self.progress.pack(fill="x", pady=(0, 5))
+        self.progress.start(12)
+        self.append_log(f"\n> Análisis por tamaño de {run['path'].name} ({configuration})")
+        threading.Thread(target=self.morphology_worker, args=(command,), daemon=True).start()
+        self.root.after(100, self.poll_events)
+
+    def export_run_summary(self) -> None:
+        run = self.selected_summary_run()
+        table = getattr(self, "summary_frame", None)
+        if run is None or table is None:
+            return
+        suffix = f"_{self.summary_config_var.get()}" if run["kind"] == "2D" and self.summary_config_var.get() else ""
+        path = run["path"] / f"case_summary{suffix}.csv"
+        table.to_csv(path, index=False)
+        self.append_log(f"Tabla por caso guardada en {path}")
+        messagebox.showinfo("Tabla exportada", f"Guardada en:\n{path}", parent=self.summary_window)
 
     def build_results_section(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Resultados guardados", style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 8))
@@ -507,8 +708,10 @@ class TpiLauncher:
         self.note_body = tk.StringVar(value="Seleccioná una figura o tabla para verla en el visor.")
         ttk.Label(parent, textvariable=self.note_title, style="SectionTitle.TLabel").pack(anchor="w", pady=(8, 2))
         ttk.Label(parent, textvariable=self.note_body, style="Body.TLabel", wraplength=280).pack(fill="x")
+        ttk.Button(parent, text="Tabla por caso (corridas 2D y 3D)", style="Secondary.TButton",
+                   command=self.open_run_summary).pack(fill="x", pady=(7, 4))
         ttk.Button(parent, text="Abrir carpeta de resultados", style="Secondary.TButton",
-                   command=self.open_results).pack(fill="x", pady=(7, 4))
+                   command=self.open_results).pack(fill="x", pady=(0, 4))
         ttk.Button(parent, text="Elegir carpeta…", style="Secondary.TButton",
                    command=self.browse_results_path).pack(fill="x")
         ttk.Label(parent, text="Registro", style="Body.TLabel").pack(anchor="w", pady=(6, 2))
@@ -820,6 +1023,64 @@ class TpiLauncher:
                 if value or key not in ("background_sigma_mm", "noise_floor_hu"):
                     detector[key] = float(value)
         return config, segment
+
+    def apply_config_values(self, cfg: dict) -> None:
+        """Load every editable parameter from a config, discarding any applied preset."""
+        prep = cfg.get("preprocessing", {})
+        window = prep.get("hu_window", {})
+        denoise = prep.get("denoising", {})
+        enhancement = prep.get("enhancement", {})
+        edges = cfg.get("edge_analysis", {})
+        segmentation = cfg.get("segmentation", {})
+        detection = cfg.get("detection", {})
+        method = str(denoise.get("method", "gaussian"))
+        method = "bilateral" if method == "median" else method
+        parameter_key = {"bilateral": "bilateral_sigma_color", "gaussian": "gaussian_sigma",
+                         "mean": "mean_size"}.get(method, "bilateral_sigma_color")
+        parameter_default = {"bilateral": 0.08, "gaussian": 0.6, "mean": 3}.get(method, 0.08)
+        operator = str(edges.get("operator", "sobel")).lower()
+        values = {
+            "hu_window_enabled": bool(window.get("enabled", True)),
+            "center": str(window.get("center", 60)), "width": str(window.get("width", 400)),
+            "denoising": method, "parameter": str(denoise.get(parameter_key, parameter_default)),
+            "bilateral_sigma_spatial": str(denoise.get("bilateral_sigma_spatial", 3.0)),
+            "sharpen_alpha": str(edges.get("sharpen_alpha", 0.5)),
+            "edge_operator": operator if operator in ("none", "sobel", "prewitt", "laplace") else "sobel",
+            "equalization": str(enhancement.get("method", "clahe")),
+            "contrast": str(enhancement.get("contrast", 1.0)),
+            # Empty CLAHE fields mean "use the YAML value".
+            "clahe_clip_limit": "", "clahe_kernel_size": "",
+        }
+        for key, value in values.items():
+            self.preprocessing_vars[key].set(value)
+        segmentation_defaults = {"method": "global", "threshold": 0.45, "k": 1.0, "direction": "lower",
+                                 "opening": False, "closing": False, "fill_holes": False,
+                                 "footprint": "disk", "radius": 2, "min_area": 10}
+        for key, variable in self.segmentation_vars.items():
+            value = segmentation.get(key, segmentation_defaults[key])
+            variable.set(bool(value) if isinstance(variable, tk.BooleanVar) else str(value))
+        detector_defaults = {"sigma_mm": 0.6, "high": 1.0, "low": 0.5, "min_area_mm2": 0.0}
+        for key, variable in self.detection_vars.items():
+            variable.set(str(detection[key]) if key in detection else str(detector_defaults.get(key, "")))
+        local = str(detection.get("method", "")).startswith("local_")
+        self.local_parameters = {k: v for k, v in detection.items() if k != "enabled"} if local else {}
+        self.local_high.set(str(detection.get("high", 2.0) if local else 2.0))
+        self.local_refinement.set(str(detection.get("refinement", 2.0)))
+        self.local_polarity.set(str(detection.get("polarity", "dark")))
+        self.local_context.set(bool(detection.get("context", True)))
+        self.local_config_pipeline.set(cfg.get("local_pipeline", "raw_hu") == "configured")
+        self.detection_method.set(str(detection.get("method", "hysteresis")))
+        self.detection_enabled.set(bool(detection.get("enabled", False)))
+        self.experiment_preset_applied = False
+        self.preset_status.set("Parámetros cargados desde la configuración.")
+
+    def restore_config_values(self) -> None:
+        try:
+            self.apply_config_values(load_config(self.config_path.get()))
+        except Exception as exc:
+            messagebox.showerror("Configuración inválida", str(exc))
+            return
+        self.append_log(f"Parámetros restaurados desde {self.config_path.get()}.")
 
     def apply_experiment_preset(self) -> None:
         name = self.experiment_preset.get()
@@ -1235,14 +1496,22 @@ class TpiLauncher:
     def load_morphology_results(self) -> None:
         try:
             config = load_config(self.config_path.get())
-            output = Path(config["_output_dir"]) / "morphology_3d"
-            summary_path = output / "morphology_3d_per_case.csv"
-            if summary_path.is_file():
-                self.show_morphology_results(output)
+            from psib.morphology3d import latest_morphology_output
+            output = latest_morphology_output(Path(config["_output_dir"]))
+            if output is not None:
+                self.show_morphology_results(output, switch_section=False)
         except (OSError, ValueError, KeyError):
             return
 
-    def show_morphology_results(self, output: Path) -> None:
+    @staticmethod
+    def _format_number(value, digits: int = 1) -> str:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return "—"
+        return "—" if not np.isfinite(number) else f"{number:.{digits}f}"
+
+    def show_morphology_results(self, output: Path, switch_section: bool = True) -> None:
         self.morphology_output = output
         summary_path = output / "morphology_3d_per_case.csv"
         for item in self.morphology_table.get_children():
@@ -1251,22 +1520,66 @@ class TpiLauncher:
             with summary_path.open(newline="", encoding="utf-8") as stream:
                 for row in csv.DictReader(stream):
                     case_id = int(row["case_id"])
-                    diameter_value = row.get("max_axial_feret_mm")
-                    diameter = f"{float(diameter_value):.1f}" if diameter_value else "—"
-                    self.morphology_table.insert("", "end", values=(
-                        f"{case_id:03d}", row["connected_components_6"],
-                        f"{float(row['tumor_volume_cm3']):.2f}", diameter))
+                    # Older runs only have the largest-lesion value under the legacy name.
+                    diameter = row.get("max_axial_feret_all_mm", row.get("max_axial_feret_mm"))
+                    self.morphology_table.insert("", "end", iid=f"{case_id:03d}", values=(
+                        f"{case_id:03d}", row["connected_components_6"], row.get("lesions_ge10mm", "—"),
+                        self._format_number(row["tumor_volume_cm3"], 2), self._format_number(diameter)))
         except (OSError, ValueError, KeyError) as exc:
             self.append_log(f"No se pudo leer el resumen 3D: {exc}")
             return
-        self.morphology_output = output
+        self.results_dir = output
+        self.refresh_results_list()
+        if switch_section:
+            self.show_section("Cuantificación")
+
+    def show_morphology_surface(self, _event=None) -> None:
+        selected = self.morphology_table.selection()
+        output = getattr(self, "morphology_output", None)
+        if not selected or output is None:
+            return
+        path = output / f"case_{selected[0]}_surface_3d.png"
+        if path.is_file():
+            self.show_path(path)
+        else:
+            self.show_figure_message(f"No existe la superficie 3D del caso {selected[0]}.")
+
+    def show_prediction_3d_results(self, output: Path) -> None:
+        self.prediction_3d_output = output
+        for item in self.prediction_3d_table.get_children():
+            self.prediction_3d_table.delete(item)
+        try:
+            with (output / "morphology_3d_prediction_per_case.csv").open(newline="", encoding="utf-8") as stream:
+                for row in csv.DictReader(stream):
+                    case_id = int(row["case_id"])
+                    self.prediction_3d_table.insert("", "end", values=(
+                        f"{case_id:03d}", self._format_number(row["dice_3d_clean"], 3),
+                        self._format_number(row["reference_volume_cm3"], 1),
+                        self._format_number(row["prediction_clean_volume_cm3"], 1),
+                        f"{row.get('covered_lesions', '—')} / {row.get('reference_lesions', '—')}",
+                        row.get("false_positive_components", "—")))
+            lines = []
+            by_size = output / "morphology_3d_prediction_by_size.csv"
+            if by_size.is_file():
+                with by_size.open(newline="", encoding="utf-8") as stream:
+                    for row in csv.DictReader(stream):
+                        if row["size_group"] in ("all", "<10 mm", ">=10 mm", ">=20 mm"):
+                            lines.append(f"{row['size_group']}: {row.get('n_covered', '—')}/{row['n_lesions']} "
+                                         f"cubiertas ≥50 % · {row['n_detected']} tocadas "
+                                         f"· Dice lesión {self._format_number(row['mean_lesion_dice'], 2)}")
+            self.prediction_3d_summary.set("Por tamaño (diámetro axial máx.):\n" + "\n".join(lines)
+                                           if lines else "Sin resumen por tamaño.")
+        except (OSError, ValueError, KeyError) as exc:
+            self.append_log(f"No se pudo leer la segmentación 3D: {exc}")
+            return
         self.results_dir = output
         self.refresh_results_list()
         self.show_section("Cuantificación")
 
     def open_morphology_results(self) -> None:
-        if getattr(self, "morphology_output", None) and self.morphology_output.is_dir():
-            os.startfile(self.morphology_output)
+        output = getattr(self, "prediction_3d_output", None) or getattr(self, "morphology_output", None)
+        if output and output.is_dir():
+            os.startfile(output)
 
     def set_status(self, text: str, state: str) -> None:
         self.status.set(text)
@@ -1476,15 +1789,12 @@ class TpiLauncher:
             self.analysis_case_ids = []
             self.last_selection_signature = None
             try:
-                selection = load_config(selected).get("selection", {})
+                loaded = load_config(selected)
+                selection = loaded.get("selection", {})
                 self.selection_cases_var.set(str(selection.get("n_cases", 10)))
                 self.selection_slices_var.set(str(selection.get("slices_per_case", 5)))
-                edge_settings = load_config(selected).get("edge_analysis", {})
-                operator = str(edge_settings.get("operator", "sobel")).lower()
-                if operator in ("none", "sobel", "prewitt", "laplace"):
-                    self.preprocessing_vars["edge_operator"].set(operator)
-                self.preprocessing_vars["sharpen_alpha"].set(
-                    str(edge_settings.get("sharpen_alpha", 0.5)))
+                # Reloading a config restores all its parameters, even after a preset.
+                self.apply_config_values(loaded)
             except Exception as exc:
                 messagebox.showerror("Configuración inválida", str(exc))
                 return
@@ -1571,7 +1881,70 @@ class TpiLauncher:
         self.progress.pack(fill="x", pady=(0, 5))
         self.progress.start(12)
         self.append_log(f"\n> Iniciando morfología 3D con {config.resolve()}")
-        threading.Thread(target=self.morphology_worker, args=(config.resolve(),), daemon=True).start()
+        run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+        cfg = load_config(config)
+        self.morphology_pending = ("reference", Path(cfg["_output_dir"]) / "morphology_3d" / run_id)
+        command = [str(ROOT / "scripts" / "analyze_morphology_3d.py"), "--config", str(config.resolve()),
+                   "--run-id", run_id]
+        if self.analysis_case_ids:
+            command += ["--cases", *map(str, self.analysis_case_ids)]
+        threading.Thread(target=self.morphology_worker, args=(command,), daemon=True).start()
+        self.root.after(100, self.poll_events)
+
+    def latest_segmentation_run(self) -> Path | None:
+        """Newest completed run under results/segmentation (the 2D configuration to stack)."""
+        cfg = load_config(self.config_path.get())
+        runs = []
+        for state in (Path(cfg["_output_dir"]) / "segmentation").glob("*/run.json"):
+            try:
+                if json.loads(state.read_text(encoding="utf-8")).get("status") == "completed":
+                    runs.append(state.parent)
+            except (OSError, ValueError):
+                continue
+        # Folder names are not all timestamps (e.g. base-2083), so order by completion time.
+        return max(runs, key=lambda path: (path / "run.json").stat().st_mtime) if runs else None
+
+    def run_prediction_3d(self) -> None:
+        """Stack the latest run's 2D segmenter over full volumes and compare in 3D."""
+        if self.task_running or self.process is not None:
+            return
+        try:
+            run_dir = self.latest_segmentation_run()
+            if run_dir is None:
+                messagebox.showinfo("Sin corrida 2D", "Primero ejecutá el flujo 2D para tener una corrida completada.")
+                return
+            with (run_dir / "selected_cases_slices.csv").open(newline="", encoding="utf-8") as stream:
+                run_cases = sorted({int(row["case_id"]) for row in csv.DictReader(stream)})
+        except (OSError, ValueError, KeyError) as exc:
+            messagebox.showerror("Corrida inválida", str(exc))
+            return
+        cases = [case for case in self.analysis_case_ids if case in run_cases] or run_cases
+        minutes = len(cases) * SECONDS_PER_3D_CASE / 60
+        if not messagebox.askokcancel(
+                "Segmentar en 3D",
+                f"Corrida {run_dir.name}: se segmentarán todos los cortes de {len(cases)} casos "
+                f"(≈ {max(minutes, 1):.0f} min). El hígado usado como ROI es el de referencia.\n\n"
+                "Para menos casos, marcalos en la lista de casos antes de continuar."):
+            return
+        output_name = "morphology3d_prediction_" + datetime.now().strftime("%Y%m%d-%H%M%S")
+        command = [str(ROOT / "scripts" / "evaluate_morphology_3d.py"), "--config", self.config_path.get(),
+                   "--run-id", run_dir.name, "--output-name", output_name]
+        if len(cases) < len(run_cases):
+            command += ["--cases", *map(str, cases)]
+        self.morphology_pending = ("prediction", run_dir / output_name)
+        self.cancel_requested = False
+        self.task_running = True
+        self.run_button.configure(state="disabled")
+        for button in self.task_buttons:
+            button.configure(state="disabled")
+        self.cancel_button.configure(state="normal")
+        self.log_meta.set("SEGMENTACIÓN 3D")
+        self.set_status(f"Segmentando {len(cases)} volúmenes…", "running")
+        self.show_section("Cuantificación")
+        self.progress.pack(fill="x", pady=(0, 5))
+        self.progress.start(12)
+        self.append_log(f"\n> Segmentación 3D de {len(cases)} casos con la corrida {run_dir.name}")
+        threading.Thread(target=self.morphology_worker, args=(command,), daemon=True).start()
         self.root.after(100, self.poll_events)
 
     def run_slice_selection(self) -> None:
@@ -1664,7 +2037,7 @@ class TpiLauncher:
         except Exception as exc:
             self.events.put(("task_error", (task, str(exc))))
 
-    def morphology_worker(self, config: Path) -> None:
+    def morphology_worker(self, script_args: list[str]) -> None:
         try:
             interpreter = Path(sys.executable)
             if interpreter.name.lower() == "pythonw.exe":
@@ -1674,7 +2047,7 @@ class TpiLauncher:
             environment = os.environ.copy()
             environment["PYTHONIOENCODING"] = "utf-8"
             self.process = subprocess.Popen(
-                [str(interpreter), str(ROOT / "scripts" / "analyze_morphology_3d.py"), "--config", str(config)],
+                [str(interpreter), *script_args],
                 cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 encoding="utf-8", errors="replace", bufsize=1, env=environment,
             )
@@ -1786,11 +2159,21 @@ class TpiLauncher:
                 code = int(value)
                 if code == 0:
                     try:
-                        cfg = load_config(self.config_path.get())
-                        output = Path(cfg["_output_dir"]) / "morphology_3d"
-                        self.show_morphology_results(output)
-                        self.log_meta.set("ANÁLISIS 3D FINALIZADO")
-                        self.set_status("Morfología 3D lista", "success")
+                        mode, output = getattr(self, "morphology_pending", ("reference", None))
+                        if mode == "lesion2d":
+                            self.log_meta.set("ANÁLISIS POR TAMAÑO FINALIZADO")
+                            self.set_status("Análisis por tamaño listo", "success")
+                            window = getattr(self, "summary_window", None)
+                            if window is not None and window.winfo_exists():
+                                self.show_run_summary()
+                        elif mode == "prediction":
+                            self.show_prediction_3d_results(output)
+                            self.log_meta.set("SEGMENTACIÓN 3D FINALIZADA")
+                            self.set_status("Segmentación 3D lista", "success")
+                        else:
+                            self.show_morphology_results(output)
+                            self.log_meta.set("ANÁLISIS 3D FINALIZADO")
+                            self.set_status("Morfología 3D lista", "success")
                         self.show_section("Cuantificación")
                     except Exception as exc:
                         self.append_log(f"No se pudieron cargar los resultados 3D: {exc}")

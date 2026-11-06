@@ -32,6 +32,14 @@ def run_tpi(config_path: str | Path = ROOT / "config.yaml") -> Path:
             )
         print(f"No paired cases found in {configured}; using fallback {fallback}.", flush=True)
         cfg["data_dir"] = str(fallback)
+        # The fallback subset is small; cap the requested sample instead of failing selection.
+        available = len(list_cases(fallback))
+        selection = cfg.setdefault("selection", {})
+        for key in ("n_cases", "candidate_pool_size"):
+            if int(selection.get(key, available)) > available:
+                print(f"WARNING: selection.{key}={selection[key]} exceeds the {available} fallback cases; "
+                      f"using {available}.", flush=True)
+                selection[key] = available
     print(f"Using data directory: {cfg['data_dir']}", flush=True)
 
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S")

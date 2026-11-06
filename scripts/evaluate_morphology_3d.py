@@ -22,7 +22,8 @@ from psib.config import load_config
 from psib.detection import configured_prediction, validate_settings as validate_detection
 from psib.data_io import iter_case_slices
 from psib.metrics import dice_score, iou_score
-from psib.morphology3d import remove_small_components_3d, tumor_components_3d
+from psib.morphology3d import (filter_components_3d, match_lesions_3d,
+                               summarize_lesions_by_size, tumor_components_3d)
 from psib.preprocessing import prepare_denoised_slice
 from psib.segmentation import _validate_settings, segment_slice
 
@@ -38,6 +39,17 @@ MEASURE_COLUMNS = (
     "prediction_components_clean_6", "reference_max_axial_feret_mm",
     "prediction_raw_max_axial_feret_mm", "prediction_clean_max_axial_feret_mm",
     "clean_axial_feret_error_mm", "clean_axial_feret_relative_error",
+    "reference_lesions", "detected_lesions", "lesion_detection_rate", "covered_lesions",
+    "reference_lesions_ge10mm", "detected_lesions_ge10mm",
+    "reference_lesions_ge20mm", "detected_lesions_ge20mm",
+    "false_positive_components", "false_positive_volume_cm3", "liver_roi",
+)
+LESION_COLUMNS = (
+    "case_id", "component_id", "voxel_count", "volume_cm3", "extent_x_mm", "extent_y_mm",
+    "extent_z_mm", "max_feret_3d_mm", "max_axial_feret_mm", "equivalent_diameter_mm",
+    "bbox_diagonal_mm", "bbox_start_x", "bbox_start_y", "bbox_start_z",
+    "matched_prediction_components", "matched_prediction_voxels", "intersection_voxels",
+    "coverage", "lesion_dice", "lesion_iou", "detected", "covered",
 )
 
 
@@ -85,7 +97,8 @@ def _volume_cm3(mask: np.ndarray, spacing) -> float:
 
 def _measure_case(case_id: int, ct_dir: Path, settings: dict, cfg: dict,
                   min_component_voxels: int, output_dir: Path,
-                  configuration_id: str) -> tuple[dict, list[dict]]:
+                  configuration_id: str, *, min_volume_mm3: float = 0.0, min_slices: int = 1,
+                  min_iou: float = 0.0, save_masks: bool = True) -> tuple[dict, list[dict], list[dict]]:
     predicted_planes, reference_planes, spacing = [], [], None
     for slice_index, hu, labels, spacing in iter_case_slices(case_id, data_dir=ct_dir):
         liver = labels > 0
@@ -101,10 +114,16 @@ def _measure_case(case_id: int, ct_dir: Path, settings: dict, cfg: dict,
 
     prediction_raw = np.stack(predicted_planes, axis=2)
     reference = np.stack(reference_planes, axis=2)
-    prediction_clean = prediction_raw.copy() if "detection" in settings else remove_small_components_3d(prediction_raw, min_component_voxels)
-    ref_components, _ = tumor_components_3d(np.where(reference, 2, 0).astype(np.uint8), spacing)
+    prediction_clean = (prediction_raw.copy() if "detection" in settings else
+                        filter_components_3d(prediction_raw, spacing, min_component_voxels,
+                                             min_volume_mm3, min_slices))
+    ref_result = tumor_components_3d(np.where(reference, 2, 0).astype(np.uint8), spacing)
     raw_components, _ = tumor_components_3d(np.where(prediction_raw, 2, 0).astype(np.uint8), spacing)
-    clean_components, _ = tumor_components_3d(np.where(prediction_clean, 2, 0).astype(np.uint8), spacing)
+    clean_result = tumor_components_3d(np.where(prediction_clean, 2, 0).astype(np.uint8), spacing)
+    ref_components, clean_components = ref_result[0], clean_result[0]
+    # Lesions are matched with 26-connectivity (own labelling); descriptive counts stay 6-connected.
+    lesions, false_positives = match_lesions_3d(reference, prediction_clean, spacing, min_iou)
+    lesions = [{"case_id": case_id, **item} for item in lesions]
 
     ref_volume = _volume_cm3(reference, spacing)
     clean_volume = _volume_cm3(prediction_clean, spacing)
@@ -135,10 +154,24 @@ def _measure_case(case_id: int, ct_dir: Path, settings: dict, cfg: dict,
         "prediction_clean_max_axial_feret_mm": clean_diameter,
         "clean_axial_feret_error_mm": clean_diameter - ref_diameter,
         "clean_axial_feret_relative_error": _relative_error(clean_diameter, ref_diameter),
+        "reference_lesions": len(lesions),
+        "detected_lesions": sum(item["detected"] for item in lesions),
+        "lesion_detection_rate": (sum(item["detected"] for item in lesions) / len(lesions)
+                                  if lesions else float("nan")),
+        "covered_lesions": sum(item["covered"] for item in lesions),
+        "false_positive_components": len(false_positives),
+        "false_positive_volume_cm3": float(sum(item["volume_cm3"] for item in false_positives)),
+        # The liver ROI that restricts the 2D predictor comes from the reference labels.
+        "liver_roi": "reference",
     }
-    np.savez_compressed(output_dir / f"case_{case_id:03d}_masks_3d.npz",
-                        reference=reference, prediction_raw=prediction_raw,
-                        prediction_clean=prediction_clean)
+    for threshold in (10, 20):
+        group = [item for item in lesions if item["max_axial_feret_mm"] >= threshold]
+        row[f"reference_lesions_ge{threshold}mm"] = len(group)
+        row[f"detected_lesions_ge{threshold}mm"] = sum(item["detected"] for item in group)
+    if save_masks:
+        np.savez_compressed(output_dir / f"case_{case_id:03d}_masks_3d.npz",
+                            reference=reference, prediction_raw=prediction_raw,
+                            prediction_clean=prediction_clean)
     lesion_rows = []
     for region, components in (("reference", ref_components),
                                ("prediction_raw", raw_components),
@@ -146,7 +179,7 @@ def _measure_case(case_id: int, ct_dir: Path, settings: dict, cfg: dict,
         lesion_rows.extend({"case_id": case_id, "region": region, **component}
                            for component in components)
     del predicted_planes, reference_planes, prediction_raw, reference, prediction_clean
-    return row, lesion_rows
+    return row, lesion_rows, lesions
 
 
 def plot_comparison(frame: pd.DataFrame, path: Path) -> None:
@@ -172,7 +205,9 @@ def plot_comparison(frame: pd.DataFrame, path: Path) -> None:
 
 
 def evaluate(run_dir: Path, data_dir: Path, min_component_voxels: int = 8,
-             configuration_id: str = "best", output_name: str = "morphology3d_prediction") -> Path:
+             configuration_id: str = "best", output_name: str = "morphology3d_prediction", *,
+             case_ids=None, min_volume_mm3: float = 0.0, min_slices: int = 1,
+             min_iou: float = 0.0, save_masks: bool = True) -> Path:
     if not re.fullmatch(r"[A-Za-z0-9_-]+", output_name):
         raise ValueError("output_name solo admite letras ASCII, números, guiones y guiones bajos.")
     if (isinstance(min_component_voxels, bool) or not isinstance(min_component_voxels, int)
@@ -186,6 +221,12 @@ def evaluate(run_dir: Path, data_dir: Path, min_component_voxels: int = 8,
     selection = pd.read_csv(selection_path)
     if selection.empty or "case_id" not in selection:
         raise ValueError("La selección de casos no tiene casos para procesar.")
+    available = sorted(pd.to_numeric(selection.case_id, errors="raise").astype(int).unique())
+    if case_ids:
+        missing = sorted(set(map(int, case_ids)) - set(available))
+        if missing:
+            raise ValueError(f"Casos no presentes en la selección de la corrida: {missing}")
+        available = sorted(set(map(int, case_ids)))
     configuration_id, settings = resolve_configuration(run_dir, configuration_id)
     cfg = yaml.safe_load((run_dir / "effective_config.yaml").read_text(encoding="utf-8"))
     output = run_dir / output_name
@@ -193,13 +234,17 @@ def evaluate(run_dir: Path, data_dir: Path, min_component_voxels: int = 8,
         raise FileExistsError(f"Ya existe {output}; use otro --output-name para preservar resultados previos.")
     output.mkdir(parents=True)
     try:
-        rows, lesion_rows = [], []
-        for case_id in sorted(pd.to_numeric(selection.case_id, errors="raise").astype(int).unique()):
-            print(f"Segmentación volumétrica estimada · caso {case_id:03d}", flush=True)
-            row, components = _measure_case(int(case_id), data_dir, settings, cfg,
-                                            min_component_voxels, output, configuration_id)
+        rows, lesion_rows, matched = [], [], []
+        for position, case_id in enumerate(available, start=1):
+            print(f"Segmentación volumétrica estimada · caso {case_id:03d} ({position}/{len(available)})",
+                  flush=True)
+            row, components, lesions = _measure_case(
+                int(case_id), data_dir, settings, cfg, min_component_voxels, output, configuration_id,
+                min_volume_mm3=min_volume_mm3, min_slices=min_slices, min_iou=min_iou,
+                save_masks=save_masks)
             rows.append(row)
             lesion_rows.extend(components)
+            matched.extend(lesions)
         per_case = pd.DataFrame(rows, columns=MEASURE_COLUMNS)
         per_case.to_csv(output / "morphology_3d_prediction_per_case.csv", index=False)
         pd.DataFrame(lesion_rows, columns=("case_id", "region", "component_id", "voxel_count",
@@ -207,10 +252,20 @@ def evaluate(run_dir: Path, data_dir: Path, min_component_voxels: int = 8,
                   "max_feret_3d_mm", "max_axial_feret_mm", "equivalent_diameter_mm",
                   "bbox_diagonal_mm", "bbox_start_x", "bbox_start_y", "bbox_start_z"
                   )).to_csv(output / "morphology_3d_prediction_per_lesion.csv", index=False)
+        pd.DataFrame(matched, columns=LESION_COLUMNS).to_csv(
+            output / "morphology_3d_prediction_lesions.csv", index=False)
+        by_size = pd.DataFrame(summarize_lesions_by_size(matched))
+        by_size.to_csv(output / "morphology_3d_prediction_by_size.csv", index=False)
+        print(by_size[["size_group", "n_lesions", "detection_rate", "covered_rate", "mean_lesion_dice"]]
+              .to_string(index=False, float_format=lambda value: f"{value:.3f}"), flush=True)
         plot_comparison(per_case, output / "comparison_3d.png")
         completed = {"status": "completed", "configuration_id": configuration_id,
                      "min_component_voxels": min_component_voxels if "detection" not in settings else None,
                      "postprocessing_3d_applied": "detection" not in settings,
+                     "min_component_mm3": min_volume_mm3 if "detection" not in settings else None,
+                     "min_slices": min_slices if "detection" not in settings else None,
+                     "lesion_min_iou": min_iou, "liver_roi": "reference", "masks_saved": save_masks,
+                     "case_ids": [int(case) for case in available],
                      "n_cases": len(rows), "finished_at": datetime.now(timezone.utc).isoformat(),
                      "interpretation": "Exploratory full-volume stacking of 2D predictions; liver ROI uses reference labels."}
         (output / "run.json").write_text(json.dumps(completed, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -233,6 +288,14 @@ def main() -> None:
     parser.add_argument("--min-component-voxels", type=int, default=None,
                         help="Mínimo de vóxeles por componente 3D; por defecto usa config")
     parser.add_argument("--output-name", default="morphology3d_prediction")
+    parser.add_argument("--cases", type=int, nargs="+", default=None,
+                        help="Evaluar solo estos casos de la selección (por defecto, todos)")
+    parser.add_argument("--min-component-mm3", type=float, default=None,
+                        help="Volumen mínimo por componente 3D en mm³; por defecto usa config (0 = sin filtro)")
+    parser.add_argument("--min-slices", type=int, default=None,
+                        help="Cortes axiales mínimos por componente 3D; por defecto usa config (1 = sin filtro)")
+    parser.add_argument("--save-masks", action="store_true",
+                        help="Guardar las máscaras 3D completas (.npz) de cada caso")
     args = parser.parse_args()
     try:
         cfg_path = args.config.resolve()
@@ -243,7 +306,13 @@ def main() -> None:
         section = cfg.get("morphology3d_prediction", {})
         min_voxels = args.min_component_voxels if args.min_component_voxels is not None else int(
             section.get("min_component_voxels", 8))
-        evaluate(run_dir, Path(cfg["data_dir"]), min_voxels, args.configuration_id, args.output_name)
+        min_mm3 = args.min_component_mm3 if args.min_component_mm3 is not None else float(
+            section.get("min_component_mm3", 0.0))
+        min_slices = args.min_slices if args.min_slices is not None else int(section.get("min_slices", 1))
+        min_iou = float(cfg.get("lesion_eval", {}).get("min_iou", 0.0))
+        evaluate(run_dir, Path(cfg["data_dir"]), min_voxels, args.configuration_id, args.output_name,
+                 case_ids=args.cases, min_volume_mm3=min_mm3, min_slices=min_slices,
+                 min_iou=min_iou, save_masks=args.save_masks)
     except (OSError, ValueError, RuntimeError, KeyError) as exc:
         parser.exit(1, f"Error en estimación morfológica 3D: {exc}\n")
 
