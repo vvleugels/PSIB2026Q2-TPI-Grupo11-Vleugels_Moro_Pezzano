@@ -198,7 +198,7 @@ class TpiLauncher:
         self.nav_buttons: dict[str, ttk.Button] = {}
         self.step_done = {section: False for section in SECTIONS}
         for index, section in enumerate(SECTIONS):
-            button = ttk.Button(self.nav, text=self.step_label(section), style="StepTab.TButton",
+            button = ttk.Button(self.nav, text=self.step_label(section), style="StepTab.TButton", width=1,
                                 command=lambda name=section: self.show_section(name))
             self.nav.columnconfigure(index, weight=1, uniform="section_tabs")
             button.grid(row=0, column=index, sticky="nsew", padx=1)
@@ -237,17 +237,21 @@ class TpiLauncher:
         self.footer.grid(row=3, column=0, sticky="ew")
         # Kept for refresh_steps; the step tabs show the same state with ✓ marks.
         self.steps_text = tk.StringVar(value="")
+        # Icon-only back/cancel buttons so the row fits the narrowest sidebar; "Siguiente" takes the rest.
         footer_nav = ttk.Frame(self.footer, style="Panel.TFrame")
         footer_nav.pack(side="bottom", fill="x")
-        self.previous_step_button = ttk.Button(footer_nav, text="◀ Anterior", style="Secondary.TButton",
+        footer_nav.columnconfigure(2, weight=1)
+        self.previous_step_button = ttk.Button(footer_nav, text="◀", width=3, style="Icon.TButton",
                                                command=lambda: self.step(-1))
-        self.previous_step_button.pack(side="left")
-        self.cancel_button = ttk.Button(footer_nav, text="■ Cancelar", style="Secondary.TButton",
+        self.previous_step_button.grid(row=0, column=0, sticky="ns")
+        self.cancel_button = ttk.Button(footer_nav, text="■", width=3, style="Icon.TButton",
                                         command=self.cancel_run, state="disabled")
-        self.cancel_button.pack(side="left", padx=6)
+        self.cancel_button.grid(row=0, column=1, sticky="ns", padx=(5, 5))
         self.next_step_button = ttk.Button(footer_nav, text="Siguiente ▶", style="Primary.TButton",
                                            command=lambda: self.step(1))
-        self.next_step_button.pack(side="right")
+        self.next_step_button.grid(row=0, column=2, sticky="ew")
+        self.add_tooltip(self.previous_step_button, "Paso anterior")
+        self.add_tooltip(self.cancel_button, "Cancelar la tarea en curso")
         self.progress = ttk.Progressbar(self.footer, mode="indeterminate", style="Run.Horizontal.TProgressbar")
 
         self.sidebar_rail = ttk.Frame(self.sidebar, style="Panel.TFrame", padding=(3, 5))
@@ -264,11 +268,41 @@ class TpiLauncher:
                                 command=lambda name=section: self.show_section(name))
             button.pack(fill="x", pady=2)
             self.rail_buttons[section] = button
+        self.make_labels_wrap(self.sidebar_content)
         self.apply_sidebar_layout()
 
     def step_label(self, section: str) -> str:
+        # Number above the name: four tabs fit even in the narrowest sidebar.
         number = "①②③④"[SECTIONS.index(section)]
-        return f"{'✓' if self.step_done.get(section) else number} {section}"
+        return f"{'✓' if self.step_done.get(section) else number}\n{section}"
+
+    def make_labels_wrap(self, widget) -> None:
+        """Make every wrapping label follow its real width, so text never runs past the sidebar."""
+        for child in widget.winfo_children():
+            if isinstance(child, ttk.Label) and str(child.cget("wraplength")) not in ("", "0"):
+                # The label must span the full width, or wrapping to its own width would shrink it.
+                if child.winfo_manager() == "pack" and child.pack_info().get("fill") not in ("x", "both"):
+                    child.pack_configure(fill="x")
+                child.bind("<Configure>", lambda event, label=child:
+                           label.configure(wraplength=max(event.width - 4, 80)), add="+")
+            self.make_labels_wrap(child)
+
+    def add_tooltip(self, widget, text: str) -> None:
+        """Small hover hint for icon-only buttons."""
+        def show(_event):
+            tip = tk.Toplevel(widget)
+            tip.wm_overrideredirect(True)
+            tip.wm_geometry(f"+{widget.winfo_rootx()}+{widget.winfo_rooty() - 26}")
+            tk.Label(tip, text=text, background="#20334F", foreground="#FFFFFF",
+                     font=("Segoe UI", 8), padx=6, pady=2).pack()
+            widget._tooltip = tip
+        def hide(_event):
+            tip = getattr(widget, "_tooltip", None)
+            if tip is not None:
+                tip.destroy()
+                widget._tooltip = None
+        widget.bind("<Enter>", show, add="+")
+        widget.bind("<Leave>", hide, add="+")
 
     def step(self, direction: int) -> None:
         index = SECTIONS.index(self.sidebar_state.active_section) + direction
@@ -332,7 +366,7 @@ class TpiLauncher:
         ttk.Button(row, text="…", width=3, style="Secondary.TButton", command=self.browse_config).pack(side="left", padx=(4, 0))
         ttk.Button(data_panel.body, text="Abrir volumen LiTS…", style="Secondary.TButton",
                    command=self.browse_volume).pack(fill="x", pady=(6, 3))
-        ttk.Button(data_panel.body, text="Restaurar parámetros del config", style="Secondary.TButton",
+        ttk.Button(data_panel.body, text="Restaurar parámetros", style="Secondary.TButton",
                    command=self.restore_config_values).pack(fill="x")
 
     def build_adjust_section(self, parent: ttk.Frame) -> None:
@@ -356,10 +390,12 @@ class TpiLauncher:
         self.slice_spin.pack(side="left", padx=(7, 0))
         jumps = ttk.Frame(parent, style="Panel.TFrame")
         jumps.pack(fill="x", pady=(5, 0))
-        ttk.Button(jumps, text="Mayor tumor", style="Secondary.TButton",
-                   command=self.jump_largest_tumor).pack(side="left", fill="x", expand=True)
-        ttk.Button(jumps, text="Siguiente seleccionado", style="Secondary.TButton",
-                   command=self.next_selected_slice).pack(side="left", fill="x", expand=True, padx=(5, 0))
+        largest = ttk.Button(jumps, text="Mayor tumor", style="Compact.TButton", command=self.jump_largest_tumor)
+        largest.pack(side="left", fill="x", expand=True)
+        selected = ttk.Button(jumps, text="Seleccionado ▶", style="Compact.TButton", command=self.next_selected_slice)
+        selected.pack(side="left", fill="x", expand=True, padx=(5, 0))
+        self.add_tooltip(largest, "Ir al corte con más tumor de referencia")
+        self.add_tooltip(selected, "Siguiente corte de la selección 2D de este caso")
         ttk.Separator(parent).pack(fill="x", pady=8)
         self.build_segmentation_section(parent)
 
@@ -497,7 +533,7 @@ class TpiLauncher:
                 self.detector_warning.configure(
                     text=f"⚠ Detector experimental activo: {self.detection_method.get()}. Reemplaza al umbral "
                          "en la prueba y en la corrida. Se desactiva en «Avanzado» o con "
-                         "«Restaurar parámetros del config».")
+                         "«Restaurar config».")
                 self.detector_warning.pack(fill="x", pady=(0, 6))
             else:
                 self.detector_warning.pack_forget()
@@ -521,7 +557,7 @@ class TpiLauncher:
                         command=self.show_case_slice).pack(anchor="w")
         ttk.Checkbutton(view.body, text="Superponer automática", variable=self.show_prediction,
                         command=self.show_case_slice).pack(anchor="w")
-        ttk.Checkbutton(view.body, text="Mostrar semillas y candidatos (detectores locales)",
+        ttk.Checkbutton(view.body, text="Mostrar semillas y candidatos\n(detectores locales)",
                         variable=self.local_overlays, command=self.redraw_slice_overlay).pack(anchor="w")
         self.labeled_entry(view.body, "Opacidad máscara (0–1)", self.overlay_opacity)
         ttk.Label(view.body, text="Lesiones del corte", style="Body.TLabel").pack(anchor="w", pady=(6, 0))
@@ -532,7 +568,7 @@ class TpiLauncher:
             self.lesion_table.column(key, width=width, anchor="center", stretch=True)
         self.lesion_table.pack(fill="x", pady=(2, 0))
 
-        advanced = CollapsibleSection(parent, "Avanzado · detectores experimentales")
+        advanced = CollapsibleSection(parent, "Avanzado · experimental")
         body = advanced.body
         ttk.Label(body, text="Alternativas exploratorias al umbral. El método final del TPI es el de arriba.",
                   style="Body.TLabel", wraplength=270).pack(anchor="w", pady=(0, 4))
@@ -545,7 +581,7 @@ class TpiLauncher:
         self.labeled_entry(body, "Tolerancia crecimiento / peso contorno-grafo", self.local_refinement)
         self.labeled_combo(body, "Candidatos locales", self.local_polarity, ("dark", "both"))
         ttk.Checkbutton(body, text="Usar cortes vecinos", variable=self.local_context).pack(anchor="w")
-        ttk.Checkbutton(body, text="Usar preprocesamiento y morfología del config",
+        ttk.Checkbutton(body, text="Usar preprocesamiento y\nmorfología del config",
                         variable=self.local_config_pipeline).pack(anchor="w")
         ttk.Button(body, text="Cargar preset local YAML", style="Secondary.TButton",
                    command=self.load_local_preset).pack(fill="x", pady=(4, 0))
@@ -563,9 +599,9 @@ class TpiLauncher:
         self.labeled_combo(parent, "Preset experimental", self.experiment_preset, EXPERIMENT_PRESETS)
         buttons = ttk.Frame(parent, style="Panel.TFrame")
         buttons.pack(fill="x", pady=(4, 2))
-        ttk.Button(buttons, text="Aplicar preset", style="Secondary.TButton",
+        ttk.Button(buttons, text="Aplicar preset", style="Compact.TButton",
                    command=self.apply_experiment_preset).pack(side="left", fill="x", expand=True)
-        ttk.Button(buttons, text="Restaurar config", style="Secondary.TButton",
+        ttk.Button(buttons, text="Restaurar config", style="Compact.TButton",
                    command=self.restore_config_values).pack(side="left", fill="x", expand=True, padx=(5, 0))
         self.preset_status = tk.StringVar(value="'default' es un preset histórico, no el método final.")
         ttk.Label(parent, textvariable=self.preset_status, style="Body.TLabel",
@@ -621,10 +657,10 @@ class TpiLauncher:
                   style="Body.TLabel", wraplength=280).pack(fill="x", pady=(0, 6))
         controls = ttk.Frame(parent, style="Panel.TFrame")
         controls.pack(fill="x")
-        self.morphology_button = ttk.Button(controls, text="Analizar 3D", style="Secondary.TButton",
+        self.morphology_button = ttk.Button(controls, text="Analizar 3D", style="Compact.TButton",
                                             command=self.run_morphology)
         self.morphology_button.pack(side="left", fill="x", expand=True)
-        self.prediction_3d_button = ttk.Button(controls, text="Segmentar en 3D", style="Secondary.TButton",
+        self.prediction_3d_button = ttk.Button(controls, text="Segmentar en 3D", style="Compact.TButton",
                                                command=self.run_prediction_3d)
         self.prediction_3d_button.pack(side="left", fill="x", expand=True, padx=(5, 0))
         ttk.Label(parent, text="Referencia 3D (doble clic: ver superficie)", style="Body.TLabel").pack(anchor="w", pady=(8, 0))
@@ -852,9 +888,9 @@ class TpiLauncher:
         ttk.Label(parent, textvariable=self.note_body, style="Body.TLabel", wraplength=280).pack(fill="x")
         folders = ttk.Frame(parent, style="Panel.TFrame")
         folders.pack(fill="x", pady=(6, 8))
-        ttk.Button(folders, text="Abrir carpeta", style="Secondary.TButton",
+        ttk.Button(folders, text="Abrir carpeta", style="Compact.TButton",
                    command=self.open_results).pack(side="left", fill="x", expand=True)
-        ttk.Button(folders, text="Elegir carpeta…", style="Secondary.TButton",
+        ttk.Button(folders, text="Elegir carpeta…", style="Compact.TButton",
                    command=self.browse_results_path).pack(side="left", fill="x", expand=True, padx=(5, 0))
 
         self.panel_3d = CollapsibleSection(parent, "Análisis 3D")
@@ -1691,6 +1727,14 @@ class TpiLauncher:
         style.map("Primary.TButton", background=[("disabled", "#E8D9B8"), ("pressed", "#DD9013"), ("active", "#DD9013")])
         style.configure("Secondary.TButton", background="#FFFFFF", foreground="#29405F", font=("Segoe UI", 9, "bold"), padding=(13, 9), borderwidth=1, bordercolor="#D7E0EC")
         style.map("Secondary.TButton", background=[("disabled", "#F4F6F9"), ("pressed", "#E6EDF6"), ("active", "#F5F8FC")])
+        # Narrow buttons for rows of two and icon-only buttons (sidebar can be 300 px wide).
+        style.configure("Compact.TButton", background="#FFFFFF", foreground="#29405F", font=("Segoe UI", 9, "bold"),
+                        padding=(4, 8), borderwidth=1, bordercolor="#D7E0EC")
+        style.map("Compact.TButton", background=[("disabled", "#F4F6F9"), ("pressed", "#E6EDF6"), ("active", "#F5F8FC")])
+        style.configure("Icon.TButton", background="#FFFFFF", foreground="#29405F", font=("Segoe UI", 11, "bold"),
+                        padding=(6, 7), borderwidth=1, bordercolor="#D7E0EC")
+        style.map("Icon.TButton", background=[("disabled", "#F4F6F9"), ("pressed", "#E6EDF6"), ("active", "#F5F8FC")],
+                  foreground=[("disabled", "#B5C0CF")])
         style.configure("StatusReady.TFrame", background="#E8F4ED")
         style.configure("StatusReady.TLabel", background="#E8F4ED", foreground="#28734B", font=("Segoe UI", 9, "bold"))
         style.configure("StatusRunning.TFrame", background="#EAF1FC")
@@ -1700,7 +1744,7 @@ class TpiLauncher:
         style.configure("StatusError.TFrame", background="#FCEBEC")
         style.configure("StatusError.TLabel", background="#FCEBEC", foreground="#A83B43", font=("Segoe UI", 9, "bold"))
         style.configure("StepTab.TButton", background="#F3F6FB", foreground="#53647B", anchor="center",
-                        padding=(2, 7), borderwidth=0, font=("Segoe UI", 9, "bold"))
+                        justify="center", padding=(0, 4), borderwidth=0, font=("Segoe UI", 8))
         style.map("StepTab.TButton", background=[("active", "#E6ECF4"), ("selected", "#F5A524")],
                   foreground=[("selected", "#17262B"), ("active", "#20334F")])
         style.configure("Fold.TButton", background="#E9EFF7", foreground="#20334F", anchor="w",

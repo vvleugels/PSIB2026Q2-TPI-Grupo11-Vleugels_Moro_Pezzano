@@ -105,10 +105,10 @@ esencial; el resto está en paneles plegables (▸).
 1. **Casos**: número de casos y cortes por caso, y **Generar selección**.
    Plegados: *Elegir casos específicos* (si hay casos marcados se usan en lugar
    de la muestra aleatoria) y *Datos y configuración* (archivo YAML, abrir un
-   volumen LiTS, restaurar parámetros).
+   volumen LiTS, **Restaurar parámetros**).
 2. **Ajustar**: elegir caso y corte, método de umbral y área mínima, y
    **Probar en este corte** (Dice/IoU del corte). Plegados: *Preprocesamiento*,
-   *Morfología*, *Visualización* y *Avanzado · detectores experimentales*.
+   *Morfología*, *Visualización* y *Avanzado · experimental*.
 3. **Ejecutar**: resumen de lo que se va a correr, **▶ Ejecutar flujo 2D** y el
    registro en vivo. La selección de cortes se regenera al ejecutar.
 4. **Resultados**: resumen de la última corrida (Dice medio y tumores medianos
@@ -120,7 +120,7 @@ En *Avanzado* están los presets `hu_sensitive`, `default` y `otsu_059` y los
 detectores locales de `config/presets/` (**Cargar preset local YAML**). Son
 alternativas experimentales; `default` es un nombre histórico y **no** el Otsu
 final. Mientras un detector está activo, el paso 2 muestra un aviso y el paso 3
-lo indica; **Restaurar parámetros del config** vuelve al método final. La
+lo indica; **Restaurar config** (en *Avanzado*) vuelve al método final. La
 interfaz permite cancelar trabajos (**■ Cancelar**) y guarda sus preferencias en
 `.psib_gui/`.
 
