@@ -7,7 +7,15 @@ from pathlib import Path
 from typing import Any
 
 
-SECTIONS = ("Caso", "Preprocesamiento", "Segmentación", "Cuantificación", "Resultados")
+SECTIONS = ("Casos", "Ajustar", "Ejecutar", "Resultados")
+# Section names used before the 4-step layout; saved profiles and old calls still resolve.
+LEGACY_SECTIONS = {"Caso": "Casos", "Preprocesamiento": "Ajustar", "Segmentación": "Ajustar",
+                   "Cuantificación": "Resultados"}
+
+
+def resolve_section(section: str) -> str:
+    """Map a current or legacy section name to a current one."""
+    return LEGACY_SECTIONS.get(section, section)
 DEFAULT_SIDEBAR_WIDTH = 340
 MIN_SIDEBAR_WIDTH = 300
 
@@ -17,10 +25,11 @@ class SidebarState:
     """Sidebar state with width limits tied to the current window geometry."""
 
     collapsed: bool = False
-    active_section: str = "Caso"
+    active_section: str = "Casos"
     width: int = DEFAULT_SIDEBAR_WIDTH
 
     def __post_init__(self) -> None:
+        self.active_section = resolve_section(self.active_section)
         if self.active_section not in SECTIONS:
             self.active_section = SECTIONS[0]
         self.width = max(MIN_SIDEBAR_WIDTH, int(self.width))
@@ -32,6 +41,7 @@ class SidebarState:
 
     def select_section(self, section: str) -> str:
         """Select a known section; selecting from the rail expands the sidebar."""
+        section = resolve_section(section)
         if section not in SECTIONS:
             raise ValueError(f"Unknown sidebar section: {section!r}")
         self.active_section = section

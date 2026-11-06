@@ -25,7 +25,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from psib.config import load_config
-from psib.gui_model import ProfileStore, SidebarState, SECTIONS
+from psib.gui_model import ProfileStore, SidebarState, SECTIONS, resolve_section
 from psib.data_io import list_cases, load_case, iter_case_slices
 from psib.preprocessing import liver_bounding_box, normalize_slice_hu, prepare_enhanced_slice
 from psib.detection import configured_prediction
@@ -41,6 +41,38 @@ EXPERIMENT_CONTROLS = ROOT / "config" / "presets" / "controls.json"
 EXPERIMENT_PRESETS = ("hu_sensitive", "default", "otsu_059")
 RESULT_PREFIX = "TPI run completed. Results are in "
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
+
+
+class CollapsibleSection:
+    """Header button that shows or hides a body frame (closed by default)."""
+
+    def __init__(self, parent: ttk.Frame, title: str, expanded: bool = False) -> None:
+        self.title = title
+        self.frame = ttk.Frame(parent, style="Panel.TFrame")
+        self.frame.pack(fill="x", pady=(2, 2))
+        self.header = ttk.Button(self.frame, style="Fold.TButton", command=self.toggle)
+        self.header.pack(fill="x")
+        self.body = ttk.Frame(self.frame, style="Panel.TFrame", padding=(10, 4, 0, 6))
+        self.expanded = False
+        self.expand() if expanded else self._label()
+
+    def _label(self) -> None:
+        self.header.configure(text=f"{'▾' if self.expanded else '▸'}  {self.title}")
+
+    def expand(self) -> None:
+        if not self.expanded:
+            self.body.pack(fill="x")
+            self.expanded = True
+            self._label()
+
+    def collapse(self) -> None:
+        if self.expanded:
+            self.body.pack_forget()
+            self.expanded = False
+            self._label()
+
+    def toggle(self) -> None:
+        self.collapse() if self.expanded else self.expand()
 
 
 class TpiLauncher:
@@ -134,18 +166,18 @@ class TpiLauncher:
         self.status_label = ttk.Label(self.status_pill, textvariable=self.status, style="StatusReady.TLabel")
         self.status_label.pack(side="left", padx=(7, 0))
         self.log_meta = tk.StringVar(value="LISTO PARA EJECUTAR")
-        self.build_log(self.sections["Resultados"])
+        self.build_log(self.sections["Ejecutar"])
         if self.pending_icon_warning:
             self.append_log(f"Advertencia: {self.pending_icon_warning}")
         self.bind_sidebar_shortcuts()
         self.refresh_cases()
         self.sidebar_state = saved_sidebar
-        self.show_section("Caso", persist=False)
+        self.show_section("Casos", persist=False)
         self.apply_sidebar_layout()
         self.root.bind("<Configure>", self.on_window_resize, add="+")
 
     def build_sidebar(self) -> None:
-        """Create persistent section pages, a compact rail, and pinned workflow controls."""
+        """Create the four step pages, a compact rail, and pinned step navigation."""
         self.sidebar.columnconfigure(0, weight=1)
         self.sidebar.rowconfigure(0, weight=1)
         self.sidebar_content = ttk.Frame(self.sidebar, style="Panel.TFrame")
@@ -164,9 +196,9 @@ class TpiLauncher:
         self.nav = ttk.Frame(self.sidebar_content, style="Panel.TFrame", padding=(7, 0, 7, 7))
         self.nav.grid(row=1, column=0, sticky="ew")
         self.nav_buttons: dict[str, ttk.Button] = {}
-        tab_labels = ("Caso", "Preproc.", "Segm.", "Cuant.", "Res.")
-        for index, (section, glyph, label) in enumerate(zip(SECTIONS, ("▣", "◐", "◈", "▤", "▧"), tab_labels)):
-            button = ttk.Button(self.nav, text=f"{glyph}\n{label}", style="Section.TButton",
+        self.step_done = {section: False for section in SECTIONS}
+        for index, section in enumerate(SECTIONS):
+            button = ttk.Button(self.nav, text=self.step_label(section), style="StepTab.TButton",
                                 command=lambda name=section: self.show_section(name))
             self.nav.columnconfigure(index, weight=1, uniform="section_tabs")
             button.grid(row=0, column=index, sticky="nsew", padx=1)
@@ -196,23 +228,27 @@ class TpiLauncher:
             self.sections[section] = body
             self.section_canvases[section] = canvas
 
-        self.build_case_section(self.sections["Caso"])
-        self.build_preprocessing_section(self.sections["Preprocesamiento"])
-        self.build_segmentation_section(self.sections["Segmentación"])
-        self.build_quantification_section(self.sections["Cuantificación"])
+        self.build_case_section(self.sections["Casos"])
+        self.build_adjust_section(self.sections["Ajustar"])
+        self.build_run_section(self.sections["Ejecutar"])
         self.build_results_section(self.sections["Resultados"])
 
         self.footer = ttk.Frame(self.sidebar_content, style="Panel.TFrame", padding=(10, 5, 10, 10))
         self.footer.grid(row=3, column=0, sticky="ew")
-        self.steps_text = tk.StringVar(value="1 Caso  ·  2 Preparar  ·  3 Segmentar  ·  4 Revisar")
-        ttk.Label(self.footer, textvariable=self.steps_text, style="StepCaption.TLabel",
-                  wraplength=300).pack(fill="x", pady=(0, 4))
-        self.progress = ttk.Progressbar(self.footer, mode="indeterminate", style="Run.Horizontal.TProgressbar")
-        self.cancel_button = ttk.Button(self.footer, text="Cancelar", style="Secondary.TButton",
+        # Kept for refresh_steps; the step tabs show the same state with ✓ marks.
+        self.steps_text = tk.StringVar(value="")
+        footer_nav = ttk.Frame(self.footer, style="Panel.TFrame")
+        footer_nav.pack(side="bottom", fill="x")
+        self.previous_step_button = ttk.Button(footer_nav, text="◀ Anterior", style="Secondary.TButton",
+                                               command=lambda: self.step(-1))
+        self.previous_step_button.pack(side="left")
+        self.cancel_button = ttk.Button(footer_nav, text="■ Cancelar", style="Secondary.TButton",
                                         command=self.cancel_run, state="disabled")
-        self.cancel_button.pack(side="right")
-        self.run_button = ttk.Button(self.footer, text="▶  Ejecutar flujo 2D", style="Primary.TButton", command=self.run)
-        self.run_button.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self.cancel_button.pack(side="left", padx=6)
+        self.next_step_button = ttk.Button(footer_nav, text="Siguiente ▶", style="Primary.TButton",
+                                           command=lambda: self.step(1))
+        self.next_step_button.pack(side="right")
+        self.progress = ttk.Progressbar(self.footer, mode="indeterminate", style="Run.Horizontal.TProgressbar")
 
         self.sidebar_rail = ttk.Frame(self.sidebar, style="Panel.TFrame", padding=(3, 5))
         if self._rail_icon is not None:
@@ -223,31 +259,60 @@ class TpiLauncher:
         self.rail_activity = ttk.Label(self.sidebar_rail, text="", style="RailActivity.TLabel")
         self.rail_activity.pack(fill="x", pady=(0, 6))
         self.rail_buttons: dict[str, ttk.Button] = {}
-        for section, glyph in zip(SECTIONS, ("▣", "◐", "◈", "▤", "▧")):
-            button = ttk.Button(self.sidebar_rail, text=glyph, width=4, style="Rail.TButton",
+        for index, section in enumerate(SECTIONS, start=1):
+            button = ttk.Button(self.sidebar_rail, text=str(index), width=4, style="Rail.TButton",
                                 command=lambda name=section: self.show_section(name))
             button.pack(fill="x", pady=2)
             self.rail_buttons[section] = button
         self.apply_sidebar_layout()
 
+    def step_label(self, section: str) -> str:
+        number = "①②③④"[SECTIONS.index(section)]
+        return f"{'✓' if self.step_done.get(section) else number} {section}"
+
+    def step(self, direction: int) -> None:
+        index = SECTIONS.index(self.sidebar_state.active_section) + direction
+        if 0 <= index < len(SECTIONS):
+            self.show_section(SECTIONS[index])
+
+    def step_title(self, parent: ttk.Frame, title: str, hint: str) -> None:
+        ttk.Label(parent, text=title, style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 2))
+        ttk.Label(parent, text=hint, style="Body.TLabel", wraplength=290, justify="left").pack(fill="x", pady=(0, 8))
+
     def build_case_section(self, parent: ttk.Frame) -> None:
-        ttk.Label(parent, text="Caso y corte", style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 8))
+        self.step_title(parent, "Paso 1 · Casos",
+                        "Elegí cuántos casos y cortes evaluar. Sin casos marcados se usa una muestra "
+                        "aleatoria reproducible (semilla del config). La selección se regenera al ejecutar; "
+                        "generarla ahora permite recorrer esos cortes en el paso 2.")
         self.config_path = tk.StringVar(value=str(DEFAULT_CONFIG))
-        row = ttk.Frame(parent, style="Panel.TFrame")
-        row.pack(fill="x", pady=2)
-        ttk.Entry(row, textvariable=self.config_path).pack(side="left", fill="x", expand=True)
-        ttk.Button(row, text="…", width=3, style="Secondary.TButton", command=self.browse_config).pack(side="left", padx=(4, 0))
-        ttk.Label(parent, text="Caso para previsualizar", style="Body.TLabel").pack(anchor="w", pady=(8, 2))
-        self.case_var = tk.StringVar()
-        self.case_combo = ttk.Combobox(parent, textvariable=self.case_var, state="readonly")
-        self.case_combo.pack(fill="x")
-        self.case_combo.bind("<<ComboboxSelected>>", lambda _event: self.select_case())
-        ttk.Label(parent, text="Casos para el análisis (Ctrl/Shift para varios)",
-                  style="Body.TLabel").pack(anchor="w", pady=(8, 2))
-        analysis_case_frame = ttk.Frame(parent, style="Panel.TFrame")
+        selection = load_config(DEFAULT_CONFIG).get("selection", {})
+        self.selection_cases_var = tk.StringVar(value=str(selection.get("n_cases", 10)))
+        self.selection_slices_var = tk.StringVar(value=str(selection.get("slices_per_case", 5)))
+        self.selection_controls = ttk.Frame(parent, style="Panel.TFrame")
+        self.selection_controls.pack(fill="x", pady=(0, 4))
+        ttk.Label(self.selection_controls, text="Casos a evaluar", style="Body.TLabel").grid(
+            row=0, column=0, sticky="w", pady=2)
+        self.case_count_spin = ttk.Spinbox(self.selection_controls, from_=1, to=131, width=6,
+                                           textvariable=self.selection_cases_var)
+        self.case_count_spin.grid(row=0, column=1, sticky="e", padx=(6, 0), pady=2)
+        ttk.Label(self.selection_controls, text="Cortes por caso (3–5)", style="Body.TLabel").grid(
+            row=1, column=0, sticky="w", pady=2)
+        self.slices_count_spin = ttk.Spinbox(self.selection_controls, from_=3, to=5, width=6,
+                                             textvariable=self.selection_slices_var)
+        self.slices_count_spin.grid(row=1, column=1, sticky="e", padx=(6, 0), pady=2)
+        self.selection_controls.columnconfigure(0, weight=1)
+        self.selection_button = ttk.Button(parent, text="Generar selección", style="Secondary.TButton",
+                                           command=self.run_slice_selection)
+        self.selection_button.pack(fill="x", pady=(4, 8))
+
+        cases_panel = CollapsibleSection(parent, "Elegir casos específicos")
+        ttk.Label(cases_panel.body, text="Marcá casos con Ctrl/Shift. Si hay casos marcados, se usan "
+                  "en lugar de la muestra aleatoria (también en el análisis 3D).",
+                  style="Body.TLabel", wraplength=280).pack(fill="x", pady=(0, 3))
+        analysis_case_frame = ttk.Frame(cases_panel.body, style="Panel.TFrame")
         analysis_case_frame.pack(fill="x")
         self.analysis_case_list = tk.Listbox(
-            analysis_case_frame, height=5, selectmode="extended", exportselection=False,
+            analysis_case_frame, height=6, selectmode="extended", exportselection=False,
             background="#FFFFFF", foreground="#29405F", selectbackground="#D9E7FA",
             selectforeground="#20334F", highlightthickness=1, highlightbackground="#D7E0EC",
             relief="flat", activestyle="none",
@@ -258,15 +323,29 @@ class TpiLauncher:
         self.analysis_case_list.pack(side="left", fill="x", expand=True)
         analysis_case_scroll.pack(side="right", fill="y")
         self.analysis_case_list.bind("<<ListboxSelect>>", self.on_analysis_case_select)
-        ttk.Label(parent, text="Sin casos marcados: usa la selección aleatoria con semilla.",
-                  style="Body.TLabel", wraplength=280).pack(fill="x", pady=(2, 0))
-        case_actions = ttk.Frame(parent, style="Panel.TFrame")
-        case_actions.pack(fill="x", pady=(5, 0))
-        ttk.Button(case_actions, text="Abrir volumen LiTS…", style="Secondary.TButton",
-                   command=self.browse_volume).pack(fill="x")
+
+        data_panel = CollapsibleSection(parent, "Datos y configuración")
+        ttk.Label(data_panel.body, text="Archivo de configuración", style="Body.TLabel").pack(anchor="w", pady=(0, 2))
+        row = ttk.Frame(data_panel.body, style="Panel.TFrame")
+        row.pack(fill="x", pady=2)
+        ttk.Entry(row, textvariable=self.config_path).pack(side="left", fill="x", expand=True)
+        ttk.Button(row, text="…", width=3, style="Secondary.TButton", command=self.browse_config).pack(side="left", padx=(4, 0))
+        ttk.Button(data_panel.body, text="Abrir volumen LiTS…", style="Secondary.TButton",
+                   command=self.browse_volume).pack(fill="x", pady=(6, 3))
+        ttk.Button(data_panel.body, text="Restaurar parámetros del config", style="Secondary.TButton",
+                   command=self.restore_config_values).pack(fill="x")
+
+    def build_adjust_section(self, parent: ttk.Frame) -> None:
+        self.step_title(parent, "Paso 2 · Ajustar parámetros",
+                        "Probá los parámetros en un corte. Los mismos valores se usan al ejecutar en el paso 3.")
+        ttk.Label(parent, text="Caso", style="Body.TLabel").pack(anchor="w", pady=(0, 1))
+        self.case_var = tk.StringVar()
+        self.case_combo = ttk.Combobox(parent, textvariable=self.case_var, state="readonly")
+        self.case_combo.pack(fill="x")
+        self.case_combo.bind("<<ComboboxSelected>>", lambda _event: self.select_case())
         self.case_info = tk.StringVar(value="Elegí un caso para ver forma, espaciado y rango HU.")
-        ttk.Label(parent, textvariable=self.case_info, style="Body.TLabel", wraplength=280).pack(fill="x", pady=7)
-        ttk.Label(parent, text="Corte axial", style="Body.TLabel").pack(anchor="w", pady=(4, 0))
+        ttk.Label(parent, textvariable=self.case_info, style="Body.TLabel", wraplength=280).pack(fill="x", pady=(3, 4))
+        ttk.Label(parent, text="Corte axial", style="Body.TLabel").pack(anchor="w")
         slice_row = ttk.Frame(parent, style="Panel.TFrame")
         slice_row.pack(fill="x")
         self.slice_var = tk.IntVar(value=0)
@@ -275,33 +354,16 @@ class TpiLauncher:
         self.slice_spin = ttk.Spinbox(slice_row, from_=0, to=0, width=6, textvariable=self.slice_var,
                                       command=self.show_case_slice)
         self.slice_spin.pack(side="left", padx=(7, 0))
-        ttk.Button(parent, text="Ir al corte con mayor tumor", style="Secondary.TButton",
-                   command=self.jump_largest_tumor).pack(fill="x", pady=(7, 3))
-        ttk.Button(parent, text="Siguiente corte seleccionado", style="Secondary.TButton",
-                   command=self.next_selected_slice).pack(fill="x")
-        selection = load_config(DEFAULT_CONFIG).get("selection", {})
-        self.selection_cases_var = tk.StringVar(value=str(selection.get("n_cases", 10)))
-        self.selection_slices_var = tk.StringVar(value=str(selection.get("slices_per_case", 5)))
-        self.selection_controls = ttk.Frame(parent, style="Panel.TFrame")
-        self.selection_controls.pack(fill="x", pady=(9, 2))
-        ttk.Label(self.selection_controls, text="Casos a evaluar", style="Body.TLabel").grid(
-            row=0, column=0, sticky="w", pady=2)
-        self.case_count_spin = ttk.Spinbox(self.selection_controls, from_=1, to=131, width=6, textvariable=self.selection_cases_var)
-        self.case_count_spin.grid(row=0, column=1, sticky="e", padx=(6, 0), pady=2)
-        ttk.Label(self.selection_controls, text="Cortes por caso (3–5)", style="Body.TLabel").grid(
-            row=1, column=0, sticky="w", pady=2)
-        self.slices_count_spin = ttk.Spinbox(self.selection_controls, from_=3, to=5, width=6,
-                                             textvariable=self.selection_slices_var)
-        self.slices_count_spin.grid(row=1, column=1, sticky="e", padx=(6, 0), pady=2)
-        self.selection_controls.columnconfigure(0, weight=1)
-        self.selection_button = ttk.Button(parent, text="Aplicar y generar selección 2D",
-                                           style="Secondary.TButton", command=self.run_slice_selection)
-        self.selection_button.pack(fill="x", pady=(3, 3))
+        jumps = ttk.Frame(parent, style="Panel.TFrame")
+        jumps.pack(fill="x", pady=(5, 0))
+        ttk.Button(jumps, text="Mayor tumor", style="Secondary.TButton",
+                   command=self.jump_largest_tumor).pack(side="left", fill="x", expand=True)
+        ttk.Button(jumps, text="Siguiente seleccionado", style="Secondary.TButton",
+                   command=self.next_selected_slice).pack(side="left", fill="x", expand=True, padx=(5, 0))
+        ttk.Separator(parent).pack(fill="x", pady=8)
+        self.build_segmentation_section(parent)
 
     def build_preprocessing_section(self, parent: ttk.Frame) -> None:
-        ttk.Label(parent, text="Preprocesamiento", style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 8))
-        ttk.Label(parent, text="Los filtros usan la máscara hepática. El detector HU recibe los HU originales.",
-                  wraplength=280).pack(anchor="w", pady=(0, 6))
         cfg = load_config(DEFAULT_CONFIG)
         prep = cfg.get("preprocessing", {})
         window = prep.get("hu_window", {})
@@ -332,6 +394,8 @@ class TpiLauncher:
             "clahe_kernel_size": tk.StringVar(),
             "crop": tk.BooleanVar(value=True),
         }
+        ttk.Label(parent, text="Los filtros se aplican dentro de la máscara hepática.",
+                  style="Body.TLabel", wraplength=270).pack(anchor="w", pady=(0, 2))
         ttk.Checkbutton(parent, text="Aplicar ventana HU", variable=self.preprocessing_vars["hu_window_enabled"]).pack(anchor="w")
         self.labeled_entry(parent, "Centro de ventana (HU)", self.preprocessing_vars["center"])
         self.labeled_entry(parent, "Ancho de ventana (HU)", self.preprocessing_vars["width"])
@@ -349,47 +413,28 @@ class TpiLauncher:
         self.labeled_entry(parent, "Contraste (1 = neutro)", self.preprocessing_vars["contrast"])
         ttk.Checkbutton(parent, text="Recortar a hígado (visualización)", variable=self.preprocessing_vars["crop"]).pack(anchor="w", pady=6)
         ttk.Button(parent, text="Aplicar al corte", style="Secondary.TButton",
-                   command=self.apply_preprocessing).pack(fill="x", pady=6)
+                   command=self.apply_preprocessing).pack(fill="x", pady=(0, 4))
 
     def build_segmentation_section(self, parent: ttk.Frame) -> None:
-        ttk.Label(parent, text="Segmentación 2D", style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 8))
-        self.build_experiment_presets(parent)
-        defaults = load_config(DEFAULT_CONFIG).get("segmentation", {})
-        detection = load_config(DEFAULT_CONFIG).get("detection", {})
+        cfg = load_config(DEFAULT_CONFIG)
+        defaults = cfg.get("segmentation", {})
+        detection = cfg.get("detection", {})
+        local_method = str(detection.get("method", "")).startswith("local_")
+        # Variables first: the visible fields and the folded panels share them.
         self.detection_enabled = tk.BooleanVar(value=detection.get("enabled", False))
         self.detection_method = tk.StringVar(value=detection.get("method", "hysteresis"))
-        self.labeled_combo(parent, "Salida del detector", self.detection_method,
-                           ("hysteresis", "watershed", "local_growth", "local_contour", "local_graphcut"))
-        self.local_high = tk.StringVar(value=str(detection.get("high", 2.) if str(detection.get("method", "")).startswith("local_") else 2.))
+        self.local_high = tk.StringVar(value=str(detection.get("high", 2.) if local_method else 2.))
         self.local_refinement = tk.StringVar(value=str(detection.get("refinement", 2.)))
         self.local_polarity = tk.StringVar(value=detection.get("polarity", "dark"))
         self.local_context = tk.BooleanVar(value=detection.get("context", True))
-        self.local_config_pipeline = tk.BooleanVar(
-            value=load_config(DEFAULT_CONFIG).get("local_pipeline", "raw_hu") == "configured")
+        self.local_config_pipeline = tk.BooleanVar(value=cfg.get("local_pipeline", "raw_hu") == "configured")
         self.local_overlays = tk.BooleanVar(value=False)
-        self.local_parameters = ({k: v for k, v in detection.items() if k != "enabled"}
-                                 if str(detection.get("method", "")).startswith("local_") else {})
-        self.labeled_entry(parent, "Semillas locales (1,5 / 2 / 2,5)", self.local_high)
-        self.labeled_entry(parent, "Tolerancia crecimiento / peso contorno-grafo", self.local_refinement)
-        self.labeled_combo(parent, "Candidatos locales", self.local_polarity, ("dark", "both"))
-        ttk.Checkbutton(parent, text="Usar cortes vecinos (métodos locales)", variable=self.local_context).pack(anchor="w")
-        ttk.Checkbutton(parent, text="Mostrar semillas y candidatos", variable=self.local_overlays,
-                        command=self.redraw_slice_overlay).pack(anchor="w")
-        ttk.Checkbutton(parent, text="Locales: usar preprocesamiento y morfología del config",
-                        variable=self.local_config_pipeline).pack(anchor="w")
-        ttk.Button(parent, text="Cargar preset local YAML", command=self.load_local_preset).pack(fill="x")
+        self.local_parameters = ({k: v for k, v in detection.items() if k != "enabled"} if local_method else {})
         self.detection_vars = {}
-        for key, label, default in (("sigma_mm", "Suavizado (mm)", 0.6),
-                                     ("high", "Umbral de semillas", 1.0),
-                                     ("low", "Umbral de crecimiento", 0.5),
-                                     ("min_area_mm2", "Área mínima detector (mm²)", 0.0)):
+        for key, default in (("sigma_mm", 0.6), ("high", 1.0), ("low", 0.5), ("min_area_mm2", 0.0)):
             self.detection_vars[key] = tk.StringVar(value=str(detection.get(key, default)))
-            self.labeled_entry(parent, label, self.detection_vars[key])
-        for key, label in (("background_sigma_mm", "σ de fondo (mm, vacío: YAML)"),
-                           ("noise_floor_hu", "Piso de ruido (HU, vacío: YAML)")):
+        for key in ("background_sigma_mm", "noise_floor_hu"):
             self.detection_vars[key] = tk.StringVar()
-            self.labeled_entry(parent, label, self.detection_vars[key])
-        ttk.Label(parent, text="Umbralización: baseline histórico").pack(anchor="w")
         self.segmentation_vars = {
             "method": tk.StringVar(value=str(defaults.get("method", "global"))),
             "threshold": tk.StringVar(value=str(defaults.get("threshold", 0.45))),
@@ -402,81 +447,178 @@ class TpiLauncher:
             "radius": tk.StringVar(value=str(defaults.get("radius", 2))),
             "min_area": tk.StringVar(value=str(defaults.get("min_area", 10))),
         }
-        self.labeled_combo(parent, "Método", self.segmentation_vars["method"], ("global", "otsu", "statistical"))
-        threshold_entry = self.labeled_entry(parent, "Umbral manual [0–1] (global)", self.segmentation_vars["threshold"])
-        k_entry = self.labeled_entry(parent, "k estadístico", self.segmentation_vars["k"])
-        direction_combo = self.labeled_combo(parent, "Dirección (statistical)", self.segmentation_vars["direction"],
+
+        # Essentials: the threshold method and what it needs.
+        warning_holder = ttk.Frame(parent, style="Panel.TFrame")
+        warning_holder.pack(fill="x")
+        self.detector_warning = ttk.Label(warning_holder, style="Warning.TLabel", wraplength=280, padding=(8, 6))
+        self.labeled_combo(parent, "Método de umbral", self.segmentation_vars["method"],
+                                          ("global", "otsu", "statistical"))
+        method_fields = ttk.Frame(parent, style="Panel.TFrame")
+        method_fields.pack(fill="x")
+        threshold_box = ttk.Frame(method_fields, style="Panel.TFrame")
+        threshold_entry = self.labeled_entry(threshold_box, "Umbral manual [0–1]", self.segmentation_vars["threshold"])
+        statistical_box = ttk.Frame(method_fields, style="Panel.TFrame")
+        k_entry = self.labeled_entry(statistical_box, "k estadístico", self.segmentation_vars["k"])
+        direction_combo = self.labeled_combo(statistical_box, "Dirección", self.segmentation_vars["direction"],
                                              ("lower", "upper"))
-        method_hint = ttk.Label(parent, style="Body.TLabel", wraplength=270)
-        method_hint.pack(fill="x", pady=(4, 0))
+        method_hint = ttk.Label(parent, style="Body.TLabel", wraplength=280)
+        method_hint.pack(fill="x", pady=(3, 0))
+        self.labeled_entry(parent, "Área mínima (px)", self.segmentation_vars["min_area"])
+        ttk.Button(parent, text="Probar en este corte", style="Primary.TButton",
+                   command=self.segment_current_slice).pack(fill="x", pady=(8, 5))
+        self.metrics_text = tk.StringVar(value="Cobertura referencia —\nDice —  ·  IoU —  ·  área —  ·  lesiones —")
+        ttk.Label(parent, textvariable=self.metrics_text, style="Body.TLabel", wraplength=280).pack(fill="x", pady=(0, 8))
 
         def update_threshold_controls(*_args):
             method = self.segmentation_vars["method"].get()
             detector_enabled = self.detection_enabled.get()
-            global_active = not detector_enabled and method == "global"
-            statistical_active = not detector_enabled and method == "statistical"
-            threshold_entry.configure(state="normal" if global_active else "disabled")
-            k_entry.configure(state="normal" if statistical_active else "disabled")
-            direction_combo.configure(state="readonly" if statistical_active else "disabled")
+            # Only the field the chosen method uses is shown.
+            threshold_box.pack_forget()
+            statistical_box.pack_forget()
+            if method == "global":
+                threshold_box.pack(fill="x")
+            elif method == "statistical":
+                statistical_box.pack(fill="x")
+            # Same rule as before the redesign: with a detector the threshold fields do not apply.
+            # Área mínima and morphology stay editable (configured local detectors use them).
+            state = "disabled" if detector_enabled else "normal"
+            for widget in (threshold_entry, k_entry):
+                widget.configure(state=state)
+            direction_combo.configure(state="disabled" if detector_enabled else "readonly")
             hints = {
-                "global": "Global usa el umbral manual. Pulsá Segmentar corte actual para ver el cambio.",
-                "otsu": "Otsu calcula el umbral de cada corte. Elegí global para probar un valor manual.",
-                "statistical": "El método estadístico calcula el umbral con k y la dirección.",
+                "global": "Global usa el umbral manual.",
+                "otsu": "Otsu calcula el umbral de cada corte automáticamente.",
+                "statistical": "Estadístico: umbral = media ± k·desvío dentro del hígado.",
             }
-            method_hint.configure(text="La predicción usa el detector activo." if detector_enabled
+            method_hint.configure(text="" if detector_enabled
                                   else hints.get(method, f"Método '{method}' no reconocido por la GUI."))
+            if detector_enabled:
+                self.detector_warning.configure(
+                    text=f"⚠ Detector experimental activo: {self.detection_method.get()}. Reemplaza al umbral "
+                         "en la prueba y en la corrida. Se desactiva en «Avanzado» o con "
+                         "«Restaurar parámetros del config».")
+                self.detector_warning.pack(fill="x", pady=(0, 6))
+            else:
+                self.detector_warning.pack_forget()
 
         self.segmentation_vars["method"].trace_add("write", update_threshold_controls)
         self.detection_enabled.trace_add("write", update_threshold_controls)
-        update_threshold_controls()
-        ttk.Label(parent, text="Filtrado final: baseline y locales con config").pack(anchor="w")
+        self.detection_method.trace_add("write", update_threshold_controls)
+
+        preprocessing = CollapsibleSection(parent, "Preprocesamiento")
+        self.build_preprocessing_section(preprocessing.body)
+
+        morphology = CollapsibleSection(parent, "Morfología")
         for key, title in (("opening", "Apertura morfológica"), ("closing", "Cierre morfológico"),
                            ("fill_holes", "Rellenar huecos")):
-            ttk.Checkbutton(parent, text=title, variable=self.segmentation_vars[key]).pack(anchor="w")
-        self.labeled_combo(parent, "Elemento morfológico", self.segmentation_vars["footprint"], ("disk", "square"))
-        self.labeled_entry(parent, "Radio morfológico", self.segmentation_vars["radius"])
-        self.labeled_entry(parent, "Área mínima (px)", self.segmentation_vars["min_area"])
-        ttk.Separator(parent).pack(fill="x", pady=8)
-        ttk.Checkbutton(parent, text="Superponer referencia", variable=self.show_reference,
+            ttk.Checkbutton(morphology.body, text=title, variable=self.segmentation_vars[key]).pack(anchor="w")
+        self.labeled_combo(morphology.body, "Elemento morfológico", self.segmentation_vars["footprint"], ("disk", "square"))
+        self.labeled_entry(morphology.body, "Radio morfológico", self.segmentation_vars["radius"])
+
+        view = CollapsibleSection(parent, "Visualización")
+        ttk.Checkbutton(view.body, text="Superponer referencia", variable=self.show_reference,
                         command=self.show_case_slice).pack(anchor="w")
-        ttk.Checkbutton(parent, text="Superponer automática", variable=self.show_prediction,
+        ttk.Checkbutton(view.body, text="Superponer automática", variable=self.show_prediction,
                         command=self.show_case_slice).pack(anchor="w")
-        self.labeled_entry(parent, "Opacidad máscara (0–1)", self.overlay_opacity)
-        ttk.Button(parent, text="Segmentar corte actual", style="Secondary.TButton",
-                   command=self.segment_current_slice).pack(fill="x", pady=(6, 7))
-        self.metrics_text = tk.StringVar(value="Cobertura referencia —\nDice —  ·  IoU —  ·  área —  ·  lesiones —")
-        ttk.Label(parent, textvariable=self.metrics_text, style="Body.TLabel", wraplength=280).pack(fill="x")
+        ttk.Checkbutton(view.body, text="Mostrar semillas y candidatos (detectores locales)",
+                        variable=self.local_overlays, command=self.redraw_slice_overlay).pack(anchor="w")
+        self.labeled_entry(view.body, "Opacidad máscara (0–1)", self.overlay_opacity)
+        ttk.Label(view.body, text="Lesiones del corte", style="Body.TLabel").pack(anchor="w", pady=(6, 0))
         columns = ("lesion", "area", "centroid")
-        self.lesion_table = ttk.Treeview(parent, columns=columns, show="headings", height=4)
+        self.lesion_table = ttk.Treeview(view.body, columns=columns, show="headings", height=4)
         for key, title, width in (("lesion", "Lesión", 55), ("area", "px", 55), ("centroid", "Centroide", 125)):
             self.lesion_table.heading(key, text=title)
             self.lesion_table.column(key, width=width, anchor="center", stretch=True)
-        self.lesion_table.pack(fill="x", pady=(5, 0))
+        self.lesion_table.pack(fill="x", pady=(2, 0))
+
+        advanced = CollapsibleSection(parent, "Avanzado · detectores experimentales")
+        body = advanced.body
+        ttk.Label(body, text="Alternativas exploratorias al umbral. El método final del TPI es el de arriba.",
+                  style="Body.TLabel", wraplength=270).pack(anchor="w", pady=(0, 4))
+        self.build_experiment_presets(body)
+        ttk.Checkbutton(body, text="Usar detector en lugar del umbral", variable=self.detection_enabled).pack(anchor="w", pady=(6, 0))
+        self.labeled_combo(body, "Detector", self.detection_method,
+                           ("hysteresis", "watershed", "local_growth", "local_contour", "local_graphcut"))
+        ttk.Label(body, text="Detectores locales", style="Body.TLabel").pack(anchor="w", pady=(8, 0))
+        self.labeled_entry(body, "Semillas locales (1,5 / 2 / 2,5)", self.local_high)
+        self.labeled_entry(body, "Tolerancia crecimiento / peso contorno-grafo", self.local_refinement)
+        self.labeled_combo(body, "Candidatos locales", self.local_polarity, ("dark", "both"))
+        ttk.Checkbutton(body, text="Usar cortes vecinos", variable=self.local_context).pack(anchor="w")
+        ttk.Checkbutton(body, text="Usar preprocesamiento y morfología del config",
+                        variable=self.local_config_pipeline).pack(anchor="w")
+        ttk.Button(body, text="Cargar preset local YAML", style="Secondary.TButton",
+                   command=self.load_local_preset).pack(fill="x", pady=(4, 0))
+        ttk.Label(body, text="Hysteresis / watershed", style="Body.TLabel").pack(anchor="w", pady=(8, 0))
+        for key, label in (("sigma_mm", "Suavizado (mm)"), ("high", "Umbral de semillas"),
+                           ("low", "Umbral de crecimiento"), ("min_area_mm2", "Área mínima detector (mm²)"),
+                           ("background_sigma_mm", "σ de fondo (mm, vacío: YAML)"),
+                           ("noise_floor_hu", "Piso de ruido (HU, vacío: YAML)")):
+            self.labeled_entry(body, label, self.detection_vars[key])
+        update_threshold_controls()
 
     def build_experiment_presets(self, parent: ttk.Frame) -> None:
         self.experiment_preset = tk.StringVar(value="hu_sensitive")
         self.experiment_preset_applied = False
-        self.labeled_combo(parent, "Alternativas experimentales", self.experiment_preset,
-                           EXPERIMENT_PRESETS)
-        ttk.Label(parent, text="Opcionales. El método principal se carga desde config.yaml; "
-                  "el preset 'default' es una alternativa histórica.",
-                  style="Body.TLabel", wraplength=255).pack(anchor="w", pady=(4, 2))
-        ttk.Button(parent, text="Aplicar preset", style="Secondary.TButton",
-                   command=self.apply_experiment_preset).pack(fill="x", pady=(4, 2))
-        ttk.Button(parent, text="Restaurar parámetros del config", style="Secondary.TButton",
-                   command=self.restore_config_values).pack(fill="x", pady=(0, 2))
-        self.preset_status = tk.StringVar(value="Aplicá un preset para cargar sus campos editables.")
+        self.labeled_combo(parent, "Preset experimental", self.experiment_preset, EXPERIMENT_PRESETS)
+        buttons = ttk.Frame(parent, style="Panel.TFrame")
+        buttons.pack(fill="x", pady=(4, 2))
+        ttk.Button(buttons, text="Aplicar preset", style="Secondary.TButton",
+                   command=self.apply_experiment_preset).pack(side="left", fill="x", expand=True)
+        ttk.Button(buttons, text="Restaurar config", style="Secondary.TButton",
+                   command=self.restore_config_values).pack(side="left", fill="x", expand=True, padx=(5, 0))
+        self.preset_status = tk.StringVar(value="'default' es un preset histórico, no el método final.")
         ttk.Label(parent, textvariable=self.preset_status, style="Body.TLabel",
-                  wraplength=255).pack(anchor="w")
-        ttk.Separator(parent).pack(fill="x", pady=8)
+                  wraplength=270).pack(anchor="w")
+
+    def build_run_section(self, parent: ttk.Frame) -> None:
+        self.step_title(parent, "Paso 3 · Ejecutar",
+                        "Genera la selección de cortes, segmenta cada corte con los parámetros del paso 2 "
+                        "y guarda métricas y figuras en una carpeta nueva de results/segmentation.")
+        card = ttk.Frame(parent, style="Card.TFrame", padding=10)
+        card.pack(fill="x")
+        ttk.Label(card, text="Se va a ejecutar", style="CardTitle.TLabel").pack(anchor="w")
+        self.run_plan_text = tk.StringVar(value="")
+        ttk.Label(card, textvariable=self.run_plan_text, style="CardBody.TLabel", wraplength=270,
+                  justify="left").pack(fill="x", pady=(4, 0))
+        self.run_button = ttk.Button(parent, text="▶  Ejecutar flujo 2D", style="Primary.TButton", command=self.run)
+        self.run_button.pack(fill="x", pady=(10, 4))
+        ttk.Label(parent, text="Registro", style="Body.TLabel").pack(anchor="w", pady=(6, 0))
+
+    def refresh_run_plan(self) -> None:
+        """Summarize, in words, what the Ejecutar button will run with the current fields."""
+        try:
+            config, segment = self.current_settings()
+        except Exception as exc:
+            self.run_plan_text.set(f"Parámetros inválidos: {exc}")
+            return
+        marked = len(self.analysis_case_ids)
+        cases = f"{marked} casos marcados" if marked else f"{self.selection_cases_var.get()} casos (muestra aleatoria)"
+        lines = [f"• {cases} · {self.selection_slices_var.get()} cortes por caso"]
+        detector = config.get("detection", {})
+        if detector.get("enabled"):
+            lines.append(f"• ⚠ Detector experimental: {detector.get('method')}")
+        else:
+            detail = {"global": f" · umbral {segment['threshold']}",
+                      "statistical": f" · k {segment['k']} ({segment['direction']})"}.get(segment["method"], "")
+            lines.append(f"• Método: {segment['method']}{detail} · área mínima {segment['min_area']} px")
+            steps = [name for key, name in (("opening", "apertura"), ("closing", "cierre"),
+                                            ("fill_holes", "relleno")) if segment.get(key)]
+            lines.append(f"• Morfología: {', '.join(steps) or 'ninguna'} · {segment['footprint']} r={segment['radius']}")
+        prep = config.get("preprocessing", {})
+        window = prep.get("hu_window", {})
+        hu = (f"ventana HU {window.get('center')}/{window.get('width')}" if window.get("enabled", True)
+              else "sin ventana HU")
+        lines.append(f"• Preprocesamiento: {hu} · denoising {prep.get('denoising', {}).get('method')} "
+                     f"· ecualización {prep.get('enhancement', {}).get('method')}")
+        lines.append(f"• Configuración: {Path(self.config_path.get()).name}")
+        self.run_plan_text.set("\n".join(lines))
 
     def build_quantification_section(self, parent: ttk.Frame) -> None:
-        ttk.Label(parent, text="Cuantificación 3D", style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 8))
-        ttk.Label(parent, text="Analizar 3D mide las máscaras de referencia (volumen, diámetro, componentes 6-conexos). "
-                  "Segmentar en 3D aplica el segmentador 2D de la última corrida a todos los cortes, "
-                  "apila el volumen y lo compara con la referencia por vóxel y por lesión. "
-                  "Usa los casos marcados en la lista de casos, o todos los de la corrida.",
-                  style="Body.TLabel", wraplength=280).pack(fill="x", pady=(0, 8))
+        ttk.Label(parent, text="Analizar 3D mide las máscaras de referencia. Segmentar en 3D aplica el "
+                  "segmentador de la última corrida a todos los cortes y compara por vóxel y por lesión. "
+                  "Usa los casos marcados en el paso 1, o todos los de la corrida.",
+                  style="Body.TLabel", wraplength=280).pack(fill="x", pady=(0, 6))
         controls = ttk.Frame(parent, style="Panel.TFrame")
         controls.pack(fill="x")
         self.morphology_button = ttk.Button(controls, text="Analizar 3D", style="Secondary.TButton",
@@ -485,15 +627,6 @@ class TpiLauncher:
         self.prediction_3d_button = ttk.Button(controls, text="Segmentar en 3D", style="Secondary.TButton",
                                                command=self.run_prediction_3d)
         self.prediction_3d_button.pack(side="left", fill="x", expand=True, padx=(5, 0))
-        ttk.Button(controls, text="Cancelar", style="Secondary.TButton", command=self.cancel_run).pack(side="left", padx=(5, 0))
-        self.compression_button = ttk.Button(parent, text="Ejecutar experimento de compresión",
-                                             style="Secondary.TButton", command=self.run_compression)
-        self.compression_button.pack(fill="x", pady=(4, 2))
-        self.reconstruction_button = ttk.Button(parent, text="Ejecutar reconstrucción simulada",
-                                                style="Secondary.TButton", command=self.run_reconstruction)
-        self.reconstruction_button.pack(fill="x", pady=2)
-        self.task_buttons = [self.selection_button, self.morphology_button, self.prediction_3d_button,
-                             self.compression_button, self.reconstruction_button]
         ttk.Label(parent, text="Referencia 3D (doble clic: ver superficie)", style="Body.TLabel").pack(anchor="w", pady=(8, 0))
         self.morphology_table = self.sortable_table(parent, (
             ("case_id", "Caso", 50), ("lesions", "Lesiones", 55), ("ge10", "≥10 mm", 55),
@@ -508,8 +641,6 @@ class TpiLauncher:
                   wraplength=280, justify="left").pack(fill="x", pady=(2, 4))
         ttk.Button(parent, text="Abrir resultados 3D", style="Secondary.TButton",
                    command=self.open_morphology_results).pack(fill="x")
-        ttk.Button(parent, text="Tabla por caso (corridas 2D y 3D)", style="Secondary.TButton",
-                   command=self.open_run_summary).pack(fill="x", pady=(4, 0))
 
     def sortable_table(self, parent: ttk.Frame, columns) -> ttk.Treeview:
         """Treeview whose columns sort numerically (then as text) when the heading is clicked."""
@@ -695,7 +826,18 @@ class TpiLauncher:
         messagebox.showinfo("Tabla exportada", f"Guardada en:\n{path}", parent=self.summary_window)
 
     def build_results_section(self, parent: ttk.Frame) -> None:
-        ttk.Label(parent, text="Resultados guardados", style="SectionTitle.TLabel").pack(anchor="w", pady=(4, 8))
+        self.step_title(parent, "Paso 4 · Resultados",
+                        "Resumen de la última corrida, sus figuras y los análisis adicionales.")
+        card = ttk.Frame(parent, style="Card.TFrame", padding=10)
+        card.pack(fill="x")
+        ttk.Label(card, text="Última corrida", style="CardTitle.TLabel").pack(anchor="w")
+        self.latest_summary = tk.StringVar(value="Todavía no hay corridas completadas.")
+        ttk.Label(card, textvariable=self.latest_summary, style="CardBody.TLabel", wraplength=270,
+                  justify="left").pack(fill="x", pady=(4, 6))
+        ttk.Button(card, text="Tabla por caso…", style="Primary.TButton",
+                   command=self.open_run_summary).pack(fill="x")
+
+        ttk.Label(parent, text="Figuras y tablas", style="Body.TLabel").pack(anchor="w", pady=(10, 2))
         columns = ("kind", "name")
         self.results_tree = ttk.Treeview(parent, columns=columns, show="headings", height=6)
         self.results_tree.heading("kind", text="Tipo")
@@ -706,15 +848,55 @@ class TpiLauncher:
         self.results_tree.bind("<<TreeviewSelect>>", self.select_result_item)
         self.note_title = tk.StringVar(value="Descripción")
         self.note_body = tk.StringVar(value="Seleccioná una figura o tabla para verla en el visor.")
-        ttk.Label(parent, textvariable=self.note_title, style="SectionTitle.TLabel").pack(anchor="w", pady=(8, 2))
+        ttk.Label(parent, textvariable=self.note_title, style="SectionTitle.TLabel").pack(anchor="w", pady=(6, 1))
         ttk.Label(parent, textvariable=self.note_body, style="Body.TLabel", wraplength=280).pack(fill="x")
-        ttk.Button(parent, text="Tabla por caso (corridas 2D y 3D)", style="Secondary.TButton",
-                   command=self.open_run_summary).pack(fill="x", pady=(7, 4))
-        ttk.Button(parent, text="Abrir carpeta de resultados", style="Secondary.TButton",
-                   command=self.open_results).pack(fill="x", pady=(0, 4))
-        ttk.Button(parent, text="Elegir carpeta…", style="Secondary.TButton",
-                   command=self.browse_results_path).pack(fill="x")
-        ttk.Label(parent, text="Registro", style="Body.TLabel").pack(anchor="w", pady=(6, 2))
+        folders = ttk.Frame(parent, style="Panel.TFrame")
+        folders.pack(fill="x", pady=(6, 8))
+        ttk.Button(folders, text="Abrir carpeta", style="Secondary.TButton",
+                   command=self.open_results).pack(side="left", fill="x", expand=True)
+        ttk.Button(folders, text="Elegir carpeta…", style="Secondary.TButton",
+                   command=self.browse_results_path).pack(side="left", fill="x", expand=True, padx=(5, 0))
+
+        self.panel_3d = CollapsibleSection(parent, "Análisis 3D")
+        self.build_quantification_section(self.panel_3d.body)
+        extra = CollapsibleSection(parent, "Compresión y reconstrucción")
+        ttk.Label(extra.body, text="Experimentos sobre los cortes de la selección actual (generala en el paso 1).",
+                  style="Body.TLabel", wraplength=280).pack(fill="x", pady=(0, 4))
+        self.compression_button = ttk.Button(extra.body, text="Experimento de compresión",
+                                             style="Secondary.TButton", command=self.run_compression)
+        self.compression_button.pack(fill="x", pady=(0, 3))
+        self.reconstruction_button = ttk.Button(extra.body, text="Reconstrucción simulada",
+                                                style="Secondary.TButton", command=self.run_reconstruction)
+        self.reconstruction_button.pack(fill="x")
+        self.task_buttons = [self.selection_button, self.morphology_button, self.prediction_3d_button,
+                             self.compression_button, self.reconstruction_button]
+
+    def refresh_latest_summary(self) -> None:
+        """Fill the Resultados card from the newest completed 2D run."""
+        from psib.run_summary import case_table
+        try:
+            run_dir = self.latest_segmentation_run()
+            if run_dir is None:
+                self.latest_summary.set("Todavía no hay corridas completadas.")
+                return
+            table, info = case_table(run_dir)
+        except Exception as exc:
+            self.latest_summary.set(f"No se pudo resumir la última corrida: {exc}")
+            return
+        mean = table.iloc[-1]
+        lines = [f"{run_dir.name} · {info['n_cases']} casos",
+                 f"Dice medio por caso: {self._format_number(mean.case_dice, 3)} · "
+                 f"precisión {self._format_number(mean.precision, 3)}"]
+        if info["has_sizes"]:
+            for key, label in (("medium", "Medianos 10–20 mm"), ("large", "Grandes ≥20 mm")):
+                total = int(mean[f"{key}_total"])
+                covered = int(mean[f"{key}_covered"])
+                rate = f" ({100 * covered / total:.0f} %)" if total else ""
+                lines.append(f"{label}: {covered}/{total} cubiertos{rate} · Dice lesión "
+                             f"{self._format_number(mean[f'{key}_dice'], 2)}")
+        else:
+            lines.append("Por tamaño: abrí la tabla por caso y pulsá «Calcular por tamaño (2D)».")
+        self.latest_summary.set("\n".join(lines))
 
     def labeled_entry(self, parent, label: str, variable: tk.Variable) -> ttk.Entry:
         ttk.Label(parent, text=label, style="Body.TLabel").pack(anchor="w", pady=(5, 1))
@@ -742,6 +924,8 @@ class TpiLauncher:
         return ""
 
     def show_section(self, section: str, persist: bool = True) -> None:
+        requested = section
+        section = resolve_section(section)
         was_collapsed = self.sidebar_state.collapsed
         self.sidebar_state.select_section(section)
         if was_collapsed:
@@ -756,6 +940,16 @@ class TpiLauncher:
             button.state(["selected"] if name == section else ["!selected"])
         for name, button in self.rail_buttons.items():
             button.state(["selected"] if name == section else ["!selected"])
+        index = SECTIONS.index(section)
+        self.previous_step_button.configure(state="normal" if index > 0 else "disabled")
+        self.next_step_button.configure(state="normal" if index < len(SECTIONS) - 1 else "disabled")
+        if requested == "Cuantificación":
+            # Old "Cuantificación" calls come from the 3D workflow.
+            self.panel_3d.expand()
+        if section == "Ejecutar":
+            self.refresh_run_plan()
+        elif section == "Resultados":
+            self.refresh_latest_summary()
         if persist:
             self.store.save_sidebar(self.sidebar_state)
 
@@ -1230,6 +1424,21 @@ class TpiLauncher:
         labels = ("Caso", "Preparar", "Segmentar", "Resultados")
         self.steps_text.set("  ·  ".join(("✓ " if done else "○ ") + label
                                         for done, label in zip(states, labels)))
+        self.update_step_marks()
+
+    def update_step_marks(self) -> None:
+        try:
+            selection_ready = self.last_selection_signature == self.current_selection_signature()
+        except Exception:
+            selection_ready = False
+        self.step_done.update({
+            "Casos": bool(selection_ready),
+            "Ajustar": self.current_prediction is not None,
+            "Ejecutar": bool(self.results_dir and self.results_dir.is_dir()),
+            "Resultados": False,
+        })
+        for section, button in self.nav_buttons.items():
+            button.configure(text=self.step_label(section))
 
     def draw_case_image(self, image: np.ndarray) -> None:
         source = np.asarray(image, dtype=np.float32)
@@ -1430,7 +1639,7 @@ class TpiLauncher:
     def build_log(self, parent: ttk.Frame) -> None:
         surface = ttk.Frame(parent, style="Log.TFrame", padding=1)
         surface.pack(fill="x", pady=(7, 0))
-        self.log = tk.Text(surface, wrap="word", height=7, state="disabled", font=("Cascadia Mono", 8),
+        self.log = tk.Text(surface, wrap="word", height=16, state="disabled", font=("Cascadia Mono", 8),
                            background="#111C2E", foreground="#D7E0ED", insertbackground="#FFFFFF",
                            relief="flat", borderwidth=0, padx=8, pady=7)
         scrollbar = ttk.Scrollbar(surface, orient="vertical", command=self.log.yview, style="Log.Vertical.TScrollbar")
@@ -1490,6 +1699,16 @@ class TpiLauncher:
         style.configure("StatusSuccess.TLabel", background="#E8F4ED", foreground="#28734B", font=("Segoe UI", 9, "bold"))
         style.configure("StatusError.TFrame", background="#FCEBEC")
         style.configure("StatusError.TLabel", background="#FCEBEC", foreground="#A83B43", font=("Segoe UI", 9, "bold"))
+        style.configure("StepTab.TButton", background="#F3F6FB", foreground="#53647B", anchor="center",
+                        padding=(2, 7), borderwidth=0, font=("Segoe UI", 9, "bold"))
+        style.map("StepTab.TButton", background=[("active", "#E6ECF4"), ("selected", "#F5A524")],
+                  foreground=[("selected", "#17262B"), ("active", "#20334F")])
+        style.configure("Fold.TButton", background="#E9EFF7", foreground="#20334F", anchor="w",
+                        font=("Segoe UI", 9, "bold"), padding=(8, 6), borderwidth=0)
+        style.map("Fold.TButton", background=[("active", "#DCE5F1")])
+        style.configure("Warning.TLabel", background="#FFF4DE", foreground="#7A4B00", font=("Segoe UI", 9))
+        style.configure("CardTitle.TLabel", background="#FFFFFF", foreground="#20334F", font=("Segoe UI", 10, "bold"))
+        style.configure("CardBody.TLabel", background="#FFFFFF", foreground="#3B4C63", font=("Segoe UI", 9))
         style.configure("Run.Horizontal.TProgressbar", background="#3475D7", troughcolor="#DFE8F5", bordercolor="#DFE8F5", lightcolor="#3475D7", darkcolor="#3475D7")
         style.configure("Log.Vertical.TScrollbar", background="#E1E8F1", troughcolor="#111C2E", bordercolor="#111C2E", arrowcolor="#64758D")
 
@@ -2126,6 +2345,8 @@ class TpiLauncher:
                                          * int(self.selection_slices_var.get()))
                             message = f"Selección generada: {case_count} casos, {len(rows)} cortes"
                             self.append_log(message)
+                            self.append_log("Paso 2: ajustá parámetros, o pasá al paso 3 para ejecutar.")
+                            self.update_step_marks()
                             complete = len(rows) >= requested
                             self.log_meta.set("SELECCIÓN 2D LISTA" if complete else "SELECCIÓN 2D INCOMPLETA")
                             self.set_status(message, "success" if complete else "error")
@@ -2194,6 +2415,8 @@ class TpiLauncher:
                     self.last_selection_signature = self.current_selection_signature()
                     count = self.load_run_figures(self.results_dir) if self.results_dir else 0
                     self.log_meta.set("CORRIDA FINALIZADA")
+                    self.update_step_marks()
+                    self.refresh_latest_summary()
                     if count:
                         self.set_status(f"Listo · {count} figuras", "success")
                         self.show_section("Resultados")

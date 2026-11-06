@@ -98,24 +98,31 @@ lo reemplaza. Las salidas se escriben bajo `output_dir` (por defecto `results/`)
 
 ## Uso de la GUI
 
-Elegir un caso en **Caso** o abrir un volumen compatible y su máscara asociada.
-Recorrer cortes y ajustar preprocesamiento y segmentación; aplicar al corte
-para inspeccionar la predicción. **Ejecutar flujo 2D** genera la selección y
-procesa el lote. Revisar el número de casos antes de iniciarlo.
+La interfaz sigue cuatro pasos, con **◀ Anterior / Siguiente ▶** abajo; también
+se puede saltar a cualquier paso desde las pestañas. Cada paso muestra solo lo
+esencial; el resto está en paneles plegables (▸).
 
-Los presets `hu_sensitive`, `default` y `otsu_059` son alternativas experimentales;
-`default` es el nombre histórico de un preset y **no** el Otsu final del archivo
-principal. Los presets locales de growth, contornos y graph cut están en
-`config/presets/` y se cargan con **Cargar preset local YAML**. Para restaurar
-los parámetros finales, volver a cargar `config.yaml`.
+1. **Casos**: número de casos y cortes por caso, y **Generar selección**.
+   Plegados: *Elegir casos específicos* (si hay casos marcados se usan en lugar
+   de la muestra aleatoria) y *Datos y configuración* (archivo YAML, abrir un
+   volumen LiTS, restaurar parámetros).
+2. **Ajustar**: elegir caso y corte, método de umbral y área mínima, y
+   **Probar en este corte** (Dice/IoU del corte). Plegados: *Preprocesamiento*,
+   *Morfología*, *Visualización* y *Avanzado · detectores experimentales*.
+3. **Ejecutar**: resumen de lo que se va a correr, **▶ Ejecutar flujo 2D** y el
+   registro en vivo. La selección de cortes se regenera al ejecutar.
+4. **Resultados**: resumen de la última corrida (Dice medio y tumores medianos
+   10–20 mm y grandes ≥20 mm cubiertos), **Tabla por caso…**, figuras y tablas
+   generadas. Plegados: *Análisis 3D* (**Analizar 3D**, **Segmentar en 3D**) y
+   *Compresión y reconstrucción* (requieren la selección del paso 1).
 
-**Cuantificación** permite analizar máscaras 3D de referencia (**Analizar 3D**),
-segmentar en 3D apilando el segmentador 2D de la última corrida
-(**Segmentar en 3D**: Dice 3D por caso y detección de lesiones por tamaño) y
-ejecutar compresión y reconstrucción. Si hay casos marcados en la lista de
-casos, el análisis 3D usa solo esos. Estas dos últimas requieren generar antes la
-selección 2D. **Resultados** muestra los archivos generados. La interfaz permite
-cancelar trabajos; sus preferencias locales se guardan en `.psib_gui/`.
+En *Avanzado* están los presets `hu_sensitive`, `default` y `otsu_059` y los
+detectores locales de `config/presets/` (**Cargar preset local YAML**). Son
+alternativas experimentales; `default` es un nombre histórico y **no** el Otsu
+final. Mientras un detector está activo, el paso 2 muestra un aviso y el paso 3
+lo indica; **Restaurar parámetros del config** vuelve al método final. La
+interfaz permite cancelar trabajos (**■ Cancelar**) y guarda sus preferencias en
+`.psib_gui/`.
 
 ## Flujo reproducible por consola
 

@@ -14,9 +14,18 @@ class SidebarStateTests(unittest.TestCase):
 
     def test_select_section_while_collapsed_expands_sidebar(self):
         state = SidebarState(collapsed=True)
-        state.select_section("Segmentación")
-        self.assertEqual(state.active_section, "Segmentación")
+        state.select_section("Ajustar")
+        self.assertEqual(state.active_section, "Ajustar")
         self.assertFalse(state.collapsed)
+
+    def test_legacy_section_names_map_to_the_four_steps(self):
+        self.assertEqual(SidebarState.from_dict({"active_section": "Segmentación"}).active_section, "Ajustar")
+        self.assertEqual(SidebarState(active_section="Caso").active_section, "Casos")
+        state = SidebarState()
+        state.select_section("Cuantificación")
+        self.assertEqual(state.active_section, "Resultados")
+        with self.assertRaises(ValueError):
+            state.select_section("Inexistente")
 
     def test_profile_store_round_trip(self):
         with tempfile.TemporaryDirectory() as directory:
